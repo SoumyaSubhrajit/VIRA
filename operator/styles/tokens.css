@@ -1,0 +1,35 @@
+/* ── Design Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg-base:        #0B0D0A;
+  --bg-panel:       #14170F;
+  --bg-panel-hover: #191d12;
+  --bg-inset:       #0e1109;
+
+  /* Borders */
+  --border-default: #2A2F1F;
+  --border-subtle:  #1e2218;
+
+  /* Signal colours */
+  --lime:           #9FBF3B;
+  --lime-dim:       rgba(159,191,59,0.15);
+  --lime-glow:      rgba(159,191,59,0.3);
+  --amber:          #E8A33D;
+  --amber-dim:      rgba(232,163,61,0.15);
+  --amber-glow:     rgba(232,163,61,0.3);
+  --danger:         #C9573D;
+  --danger-dim:     rgba(201,87,61,0.15);
+
+  /* Text */
+  --text-primary:   #E7E6DC;
+  --text-muted:     #8C9180;
+  --text-dim:       #4a4f3a;
+
+  /* Typography */
+  --font-display:   'Rajdhani', sans-serif;
+  --font-mono:      'JetBrains Mono', monospace;
+
+  /* Spacing */
+  --panel-radius:   6px;
+  --panel-padding:  1.25rem;
+}
