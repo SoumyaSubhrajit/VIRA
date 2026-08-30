@@ -53,11 +53,23 @@ type SettingsRow = {
   timezone: string;
   email_enabled: number;
   browser_enabled: number;
+  checkin_enabled: number;
+  checkin_interval_hours: number;
+  checkin_start_time: string;
+  checkin_end_time: string;
+  checkin_last_sent_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
 let database: Database.Database | null = null;
+
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
 
 function databasePath(): string {
   const configured = process.env.SCHEDULER_DB_PATH;
@@ -89,6 +101,11 @@ function initialize(db: Database.Database): void {
       timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
       email_enabled INTEGER NOT NULL DEFAULT 1 CHECK (email_enabled IN (0, 1)),
       browser_enabled INTEGER NOT NULL DEFAULT 1 CHECK (browser_enabled IN (0, 1)),
+      checkin_enabled INTEGER NOT NULL DEFAULT 1 CHECK (checkin_enabled IN (0, 1)),
+      checkin_interval_hours INTEGER NOT NULL DEFAULT 2 CHECK (checkin_interval_hours BETWEEN 1 AND 12),
+      checkin_start_time TEXT NOT NULL DEFAULT '08:00',
+      checkin_end_time TEXT NOT NULL DEFAULT '22:00',
+      checkin_last_sent_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -118,6 +135,13 @@ function initialize(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_reminder
       ON scheduler_tasks(status, reminder_sent_at, scheduled_at);
   `);
+
+  // Incremental migration for databases created before recurring check-ins existed.
+  ensureColumn(db, 'scheduler_settings', 'checkin_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'scheduler_settings', 'checkin_interval_hours', 'INTEGER NOT NULL DEFAULT 2');
+  ensureColumn(db, 'scheduler_settings', 'checkin_start_time', "TEXT NOT NULL DEFAULT '08:00'");
+  ensureColumn(db, 'scheduler_settings', 'checkin_end_time', "TEXT NOT NULL DEFAULT '22:00'");
+  ensureColumn(db, 'scheduler_settings', 'checkin_last_sent_at', 'TEXT');
 
   const upsertMode = db.prepare(`
     INSERT INTO personality_modes (
@@ -200,6 +224,11 @@ function mapSettings(row: SettingsRow): SchedulerSettings {
     timezone: row.timezone,
     emailEnabled: row.email_enabled === 1,
     browserEnabled: row.browser_enabled === 1,
+    checkInEnabled: row.checkin_enabled === 1,
+    checkInIntervalHours: row.checkin_interval_hours,
+    checkInStartTime: row.checkin_start_time,
+    checkInEndTime: row.checkin_end_time,
+    checkInLastSentAt: row.checkin_last_sent_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -221,7 +250,18 @@ export function getSchedulerSettings(userId = DEFAULT_USER_ID): SchedulerSetting
 }
 
 export function updateSchedulerSettings(
-  input: Partial<Pick<SchedulerSettings, 'subjectName' | 'reminderEmail' | 'timezone' | 'emailEnabled' | 'browserEnabled'>>,
+  input: Partial<Pick<SchedulerSettings,
+    | 'subjectName'
+    | 'reminderEmail'
+    | 'timezone'
+    | 'emailEnabled'
+    | 'browserEnabled'
+    | 'checkInEnabled'
+    | 'checkInIntervalHours'
+    | 'checkInStartTime'
+    | 'checkInEndTime'
+    | 'checkInLastSentAt'
+  >>,
   userId = DEFAULT_USER_ID
 ): SchedulerSettings {
   const allowed: Record<string, string> = {
@@ -230,6 +270,11 @@ export function updateSchedulerSettings(
     timezone: 'timezone',
     emailEnabled: 'email_enabled',
     browserEnabled: 'browser_enabled',
+    checkInEnabled: 'checkin_enabled',
+    checkInIntervalHours: 'checkin_interval_hours',
+    checkInStartTime: 'checkin_start_time',
+    checkInEndTime: 'checkin_end_time',
+    checkInLastSentAt: 'checkin_last_sent_at',
   };
   const entries = Object.entries(input).filter(([key]) => key in allowed);
   if (entries.length === 0) return getSchedulerSettings(userId);
@@ -378,6 +423,10 @@ export function markReminderSent(id: string, sentAt = new Date().toISOString(), 
   getSchedulerDb()
     .prepare('UPDATE scheduler_tasks SET reminder_sent_at = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .run(sentAt, sentAt, id, userId);
+}
+
+export function markCheckInSent(sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): void {
+  updateSchedulerSettings({ checkInLastSentAt: sentAt }, userId);
 }
 
 export function getSchedulerSnapshot(date: string, userId = DEFAULT_USER_ID): SchedulerSnapshot {

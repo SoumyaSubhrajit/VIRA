@@ -45,6 +45,55 @@ function scheduledIso(date: string, time: string): string {
   return new Date(`${date}T${time}:00`).toISOString();
 }
 
+function formatTime12(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
+function addMinutes24(time: string, amount: number): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const next = (hours * 60 + minutes + amount) % (24 * 60);
+  return `${String(Math.floor(next / 60)).padStart(2, '0')}:${String(next % 60).padStart(2, '0')}`;
+}
+
+type Period = 'AM' | 'PM';
+
+function timeParts(time: string): { hour: number; minute: number; period: Period } {
+  const [hours, minute] = time.split(':').map(Number);
+  return { hour: hours % 12 || 12, minute, period: hours >= 12 ? 'PM' : 'AM' };
+}
+
+function to24Hour(hour: number, minute: number, period: Period): string {
+  const hours = period === 'PM' ? (hour % 12) + 12 : hour % 12;
+  return `${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => index);
+
+function Time12Field({ label, value, onChange, wide = false }: { label: string; value: string; onChange: (value: string) => void; wide?: boolean }) {
+  const { hour, minute, period } = timeParts(value);
+  return (
+    <label className={wide ? styles.fieldWide : styles.field}>
+      <span className={styles.label}>{label}</span>
+      <span className={styles.timePicker}>
+        <select className={styles.timeSelect} aria-label={`${label} hour`} value={hour} onChange={(event) => onChange(to24Hour(Number(event.target.value), minute, period))}>
+          {HOUR_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+        <span className={styles.timeColon}>:</span>
+        <select className={styles.timeSelect} aria-label={`${label} minute`} value={minute} onChange={(event) => onChange(to24Hour(hour, Number(event.target.value), period))}>
+          {MINUTE_OPTIONS.map((option) => <option key={option} value={option}>{String(option).padStart(2, '0')}</option>)}
+        </select>
+        <select className={`${styles.timeSelect} ${styles.periodSelect}`} aria-label={`${label} AM or PM`} value={period} onChange={(event) => onChange(to24Hour(hour, minute, event.target.value as Period))}>
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </span>
+    </label>
+  );
+}
+
 function isTaskActive(task: SchedulerTask, now: Date): boolean {
   if (task.status !== 'planned') return false;
   const start = new Date(task.scheduledAt).getTime();
@@ -86,6 +135,9 @@ export default function SchedulerPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [email, setEmail] = useState('');
+  const [checkInEnabled, setCheckInEnabled] = useState(true);
+  const [checkInStartTime, setCheckInStartTime] = useState('08:00');
+  const [checkInEndTime, setCheckInEndTime] = useState('22:00');
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -95,8 +147,12 @@ export default function SchedulerPage() {
       const response = await fetch(`/api/scheduler?date=${encodeURIComponent(date)}`, { cache: 'no-store' });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Failed to load scheduler.');
-      setSnapshot(body as SchedulerSnapshot);
-      setEmail((body as SchedulerSnapshot).settings.reminderEmail);
+      const nextSnapshot = body as SchedulerSnapshot;
+      setSnapshot(nextSnapshot);
+      setEmail(nextSnapshot.settings.reminderEmail);
+      setCheckInEnabled(nextSnapshot.settings.checkInEnabled);
+      setCheckInStartTime(nextSnapshot.settings.checkInStartTime);
+      setCheckInEndTime(nextSnapshot.settings.checkInEndTime);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load scheduler.');
     } finally {
@@ -139,7 +195,7 @@ export default function SchedulerPage() {
       const trigger = scheduled - task.reminderMinutes * 60_000;
       if (now.getTime() >= trigger && now.getTime() <= scheduled + 5 * 60_000) {
         const mode = personalityMap[task.personalityId];
-        const notification = new Notification(`${task.startTime} — ${task.title}`, {
+        const notification = new Notification(`${formatTime12(task.startTime)} — ${task.title}`, {
           body: `${mode?.shortName ?? 'VIRA'}: ${mode?.identityStatement ?? 'Your scheduled task is ready.'}`,
           tag: key,
         });
@@ -177,7 +233,10 @@ export default function SchedulerPage() {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Failed to save task.');
-      setForm((current) => ({ ...EMPTY_FORM, startTime: current.endTime || current.startTime }));
+      setForm((current) => {
+        const startTime = current.endTime || current.startTime;
+        return { ...EMPTY_FORM, startTime, endTime: addMinutes24(startTime, 60) };
+      });
       setSuccess('Task saved to the scheduler database.');
       await load(selectedDate);
     } catch (saveError) {
@@ -221,11 +280,18 @@ export default function SchedulerPage() {
       const response = await fetch('/api/scheduler/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reminderEmail: email, emailEnabled: true }),
+        body: JSON.stringify({
+          reminderEmail: email,
+          emailEnabled: true,
+          checkInEnabled,
+          checkInIntervalHours: 2,
+          checkInStartTime,
+          checkInEndTime,
+        }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Failed to save reminder account.');
-      setSuccess('Reminder account saved locally.');
+      setSuccess(checkInEnabled ? 'Email saved. Two-hour focus check-ins are active.' : 'Reminder settings saved.');
       await load(selectedDate);
     } catch (settingsError) {
       setError(settingsError instanceof Error ? settingsError.message : 'Failed to save reminder account.');
@@ -262,7 +328,7 @@ export default function SchedulerPage() {
         </div>
         <div className={styles.topActions}>
           <span className={styles.clock}>
-            {now ? now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--:--:--'}
+            {now ? now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }) : '--:--:-- --'}
           </span>
           <Link href="/gym" className={styles.dashboardLink}>Gym</Link>
         </div>
@@ -277,7 +343,7 @@ export default function SchedulerPage() {
           <div className={styles.commandCell}>
             <span className={styles.eyebrow}>{activeTask ? 'Current task' : 'Next task'}</span>
             <div className={styles.commandTask}>
-              {focusTask ? `${focusTask.startTime} — ${focusTask.title}` : 'No planned task for this date.'}
+              {focusTask ? `${formatTime12(focusTask.startTime)} — ${focusTask.title}` : 'No planned task for this date.'}
             </div>
             {focusTask?.details && <p className={styles.commandText}>{focusTask.details}</p>}
           </div>
@@ -320,8 +386,8 @@ export default function SchedulerPage() {
                         className={`${styles.task} ${MODE_CLASS[task.personalityId]} ${current ? styles.taskCurrent : ''} ${task.status !== 'planned' ? styles.taskFinished : ''}`}
                       >
                         <div className={styles.taskTime}>
-                          {task.startTime}
-                          {task.endTime && <span className={styles.taskEnd}>to {task.endTime}</span>}
+                          {formatTime12(task.startTime)}
+                          {task.endTime && <span className={styles.taskEnd}>to {formatTime12(task.endTime)}</span>}
                         </div>
                         <div>
                           <h3 className={styles.taskTitle}>{task.title}</h3>
@@ -375,14 +441,8 @@ export default function SchedulerPage() {
                     <span className={styles.label}>Task</span>
                     <input className={styles.input} value={form.title} maxLength={140} required onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Define a concrete outcome" />
                   </label>
-                  <label className={styles.field}>
-                    <span className={styles.label}>Start</span>
-                    <input className={styles.input} type="time" value={form.startTime} required onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
-                  </label>
-                  <label className={styles.field}>
-                    <span className={styles.label}>End</span>
-                    <input className={styles.input} type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
-                  </label>
+                  <Time12Field label="Start" value={form.startTime} wide onChange={(startTime) => setForm({ ...form, startTime })} />
+                  <Time12Field label="End" value={form.endTime} wide onChange={(endTime) => setForm({ ...form, endTime })} />
                   <label className={styles.fieldWide}>
                     <span className={styles.label}>Personality required</span>
                     <select className={styles.select} value={form.personalityId} onChange={(event) => setForm({ ...form, personalityId: event.target.value as PersonalityId })}>
@@ -427,16 +487,32 @@ export default function SchedulerPage() {
             </section>
 
             <section className={styles.panel}>
-              <h2 className={styles.panelTitle}>Reminder account</h2>
-              <p className={styles.settingsHint}>Saved only in the local scheduler database. Email delivery requires RESEND_API_KEY.</p>
+              <h2 className={styles.panelTitle}>Reminder system</h2>
+              <p className={styles.settingsHint}>Your address and schedule stay in the local database. Email delivery uses the configured Resend account.</p>
               <div className={styles.settingRow}>
                 <input className={styles.input} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
-                <button className={styles.button} disabled={saving} onClick={saveSettings}>Save</button>
+              </div>
+              <div className={styles.checkInCard}>
+                <label className={styles.toggleRow}>
+                  <span>
+                    <strong>Two-hour focus email</strong>
+                    <small>Interrupt drift and reconnect you to the work.</small>
+                  </span>
+                  <input type="checkbox" checked={checkInEnabled} onChange={(event) => setCheckInEnabled(event.target.checked)} />
+                </label>
+                <div className={styles.checkInSchedule}>
+                  <Time12Field label="First email" value={checkInStartTime} onChange={setCheckInStartTime} />
+                  <Time12Field label="Last email" value={checkInEndTime} onChange={setCheckInEndTime} />
+                </div>
+                <div className={styles.checkInSummary}>
+                  Every 2 hours · {formatTime12(checkInStartTime)} to {formatTime12(checkInEndTime)} · daily
+                </div>
               </div>
               <div className={styles.checkRow}>
                 <span>Timezone: {snapshot?.settings.timezone ?? 'Asia/Kolkata'}</span>
               </div>
               <div className={styles.formActions}>
+                <button className={styles.buttonPrimary} disabled={saving || !email.trim()} onClick={saveSettings}>{saving ? 'Saving...' : 'Save email schedule'}</button>
                 <button className={styles.button} onClick={enableBrowserReminders}>Enable browser reminders</button>
               </div>
             </section>

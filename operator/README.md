@@ -49,7 +49,9 @@ SCHEDULER_SECRET=a_long_random_secret
 npm run scheduler
 ```
 
-The reminder email address is configured from the scheduler page and is saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
+Task times use explicit 12-hour hour/minute/AM-PM controls while the database stores normalized 24-hour values. The reminder panel also supports a daily two-hour focus email, enabled by default from 8:00 AM through 10:00 PM; both boundaries are adjustable.
+
+The reminder email address and focus window are configured from the scheduler page and saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
 
 ## Architecture Notes
 - All Excel parsing happens server-side in API routes (`/api/gym`, etc.).

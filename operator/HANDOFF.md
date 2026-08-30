@@ -34,6 +34,8 @@
 - Identity banner: shows the current or next task and the exact personality to embody
 - Task state: complete, skip, reset, and delete controls persist immediately
 - Reminders: browser notifications while the page is open and protected Resend email dispatch through `scheduler.js`
+- Time entry/display: explicit 12-hour hour, minute, and AM/PM controls; normalized 24-hour values remain in SQLite
+- Focus check-ins: duplicate-safe email every two hours inside a configurable daily window (default 8:00 AM–10:00 PM)
 - Scheduler storage: SQLite at `data/vira-scheduler.sqlite`, ignored by Git; reminder email is not committed
 
 ### Data files
