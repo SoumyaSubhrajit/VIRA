@@ -19,6 +19,8 @@
   --amber-glow:     rgba(232,163,61,0.3);
   --danger:         #C9573D;
   --danger-dim:     rgba(201,87,61,0.15);
+  --blue:           #7ECFFF;
+  --blue-dim:       rgba(126,207,255,0.14);
 
   /* Text */
   --text-primary:   #E7E6DC;

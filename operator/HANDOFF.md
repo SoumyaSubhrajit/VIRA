@@ -3,18 +3,24 @@
 ## Current State
 
 **Build:** ✅ Clean (`npm run build` passes with 0 TypeScript errors)
-**Dev server:** Running in background (task-269) — http://localhost:3000
+**Production server:** Verified at http://localhost:3100
 
 ### Routes
 | Route | Type | Description |
 |-------|------|-------------|
 | `/` | Static | Main dashboard (Gym, Finance, Career, Guide panels) |
 | `/gym` | Static shell + client | Dedicated gym page |
+| `/scheduler` | Static shell + client | Daily Command scheduler and personality-aware agenda |
 | `/api/gym` | Dynamic | Dashboard gym summary |
 | `/api/gym/calendar` | Dynamic | GET: full 6-month calendar / PATCH: write-back to Excel |
 | `/api/finance` | Dynamic | Finance data (mock until finance.xlsx added) |
 | `/api/career` | Dynamic | Career data (mock until career.xlsx added) |
 | `/api/guide` | Dynamic | GET: memory feed / POST: trigger Gemini observation |
+| `/api/scheduler` | Dynamic | GET: one day's tasks, settings, and three personality modes |
+| `/api/scheduler/tasks` | Dynamic | POST: create a timed task |
+| `/api/scheduler/tasks/[id]` | Dynamic | PATCH/DELETE: update status/details or delete a task |
+| `/api/scheduler/settings` | Dynamic | GET/PATCH: local reminder account and preferences |
+| `/api/scheduler/dispatch` | Dynamic | POST: protected due-email reminder dispatch |
 
 ### What's built and working
 - Dashboard with all 4 panels (Gym, Finance mock, Career mock, Guide)
@@ -24,6 +30,11 @@
 - Day detail panel: exercises list, Complete/Missed/Clear toggle, notes textarea, Save to Excel with file-lock detection
 - Excel write-back: `PATCH /api/gym/calendar` updates Completed + Notes columns in gym.xlsx directly
 - File lock detection: if gym.xlsx is open in Excel, returns HTTP 423 with clear "Close Excel" message
+- Daily Command: timed tasks are assigned to Home Self, Builder, or Free Self and sorted into a daily agenda
+- Identity banner: shows the current or next task and the exact personality to embody
+- Task state: complete, skip, reset, and delete controls persist immediately
+- Reminders: browser notifications while the page is open and protected Resend email dispatch through `scheduler.js`
+- Scheduler storage: SQLite at `data/vira-scheduler.sqlite`, ignored by Git; reminder email is not committed
 
 ### Data files
 - `data/gym.xlsx` — ✅ Real data (6-Month Calendar, Mon 15 Jun 2026 → ~Dec 2026)
@@ -39,7 +50,7 @@
 ## Key Decisions Made
 - **Excel write-back**: Chose to write directly to gym.xlsx (single source of truth). Lock file (`~$gym.xlsx`) detected before any write.
 - **Month tabs vs scroll**: Chose tabs — cleaner UX for a 7-month span.
-- **No separate DB**: Excel IS the database for gym data. Only lib functions touch the file.
+- **Hybrid persistence**: Excel remains the gym source of truth; SQLite stores scheduler tasks/settings because timed records require transactional querying and reminder state.
 - **UUID**: Using `crypto.randomUUID()` (Node built-in, no extra deps).
 - **Error state**: Added `gymError` state to DashboardShell; GymPanel shows a real error message + link to /gym.
 - **Calendar PATCH returns 423** (HTTP Locked) when Excel file is open — frontend shows 🔒 message.
@@ -47,9 +58,11 @@
 ## Known Issues / Blockers
 - If `gym.xlsx` is open in Excel when saving from the UI, save will return a 423 error. User must close Excel first. This is by design (we detect the `~$gym.xlsx` lock file).
 - Finance and Career use mock data. Real Excel files need to be placed in `data/` and parsing logic added to `lib/financeData.ts` and `lib/careerData.ts`.
+- Browser reminders require the scheduler page to remain open. For always-on delivery, run `npm run scheduler` with `RESEND_API_KEY` and `SCHEDULER_SECRET`, or configure an external cron caller.
+- The configured Gmail address is a delivery destination, not a Google account connection. Google Calendar/Gmail OAuth is not implemented.
 
 ## Next Single Task
-- Add `GEMINI_API_KEY` to `.env.local` to activate the AI Guide panel, then test the full flow end-to-end.
+- Enter the real recurring daily schedule, then add recurrence rules so repeated tasks do not need to be created manually.
 
 ## Agent Footprint (2026-06-21)
 - **What was done:** Addressed user query regarding the "top 10% industry standard" for setting up a new GitHub repository (specifically for the `VIRA` project).
