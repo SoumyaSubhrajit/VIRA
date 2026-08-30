@@ -39,6 +39,11 @@ export interface SchedulerSettings {
   timezone: string;
   emailEnabled: boolean;
   browserEnabled: boolean;
+  checkInEnabled: boolean;
+  checkInIntervalHours: number;
+  checkInStartTime: string;
+  checkInEndTime: string;
+  checkInLastSentAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

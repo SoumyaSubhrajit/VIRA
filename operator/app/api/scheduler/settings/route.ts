@@ -5,6 +5,25 @@ import type { SchedulerSettings } from '@/lib/scheduler/types';
 
 export const runtime = 'nodejs';
 
+type SettingsUpdate = Partial<Pick<SchedulerSettings,
+  | 'subjectName'
+  | 'reminderEmail'
+  | 'timezone'
+  | 'emailEnabled'
+  | 'browserEnabled'
+  | 'checkInEnabled'
+  | 'checkInIntervalHours'
+  | 'checkInStartTime'
+  | 'checkInEndTime'
+>>;
+
+function validateTime(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    throw new SchedulerValidationError(`${field} must use 24-hour HH:mm time.`);
+  }
+  return value;
+}
+
 export async function GET() {
   try {
     return NextResponse.json(getSchedulerSettings());
@@ -17,7 +36,7 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
-    const update: Partial<Pick<SchedulerSettings, 'subjectName' | 'reminderEmail' | 'timezone' | 'emailEnabled' | 'browserEnabled'>> = {};
+    const update: SettingsUpdate = {};
 
     if ('reminderEmail' in body) update.reminderEmail = validateEmail(body.reminderEmail);
     if ('subjectName' in body) {
@@ -32,11 +51,27 @@ export async function PATCH(request: NextRequest) {
       }
       update.timezone = body.timezone;
     }
-    for (const key of ['emailEnabled', 'browserEnabled'] as const) {
+    for (const key of ['emailEnabled', 'browserEnabled', 'checkInEnabled'] as const) {
       if (key in body) {
         if (typeof body[key] !== 'boolean') throw new SchedulerValidationError(`${key} must be true or false.`);
         update[key] = body[key];
       }
+    }
+    if ('checkInIntervalHours' in body) {
+      const interval = Number(body.checkInIntervalHours);
+      if (!Number.isInteger(interval) || interval < 1 || interval > 12) {
+        throw new SchedulerValidationError('checkInIntervalHours must be between 1 and 12.');
+      }
+      update.checkInIntervalHours = interval;
+    }
+    if ('checkInStartTime' in body) update.checkInStartTime = validateTime(body.checkInStartTime, 'checkInStartTime');
+    if ('checkInEndTime' in body) update.checkInEndTime = validateTime(body.checkInEndTime, 'checkInEndTime');
+
+    const current = getSchedulerSettings();
+    const startTime = update.checkInStartTime ?? current.checkInStartTime;
+    const endTime = update.checkInEndTime ?? current.checkInEndTime;
+    if (endTime <= startTime) {
+      throw new SchedulerValidationError('The check-in end time must be later than the start time.');
     }
     if (Object.keys(update).length === 0) {
       throw new SchedulerValidationError('At least one settings field must be provided.');

@@ -356,6 +356,30 @@
 .select:focus,
 .textarea:focus { border-color: var(--lime); }
 
+.timePicker {
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) auto minmax(48px, 1fr) minmax(58px, 1fr);
+  align-items: center;
+  gap: 5px;
+}
+
+.timeSelect {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  padding: 9px 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.timeSelect:focus { border-color: var(--lime); }
+.timeColon { color: var(--text-muted); }
+.periodSelect { color: var(--amber); font-weight: 700; }
+
 .textarea {
   min-height: 78px;
   resize: vertical;
@@ -403,6 +427,43 @@
 
 .settingRow .input { flex: 1; }
 
+.checkInCard {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--lime);
+  border-radius: 5px;
+  background: var(--bg-inset);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.toggleRow span { display: flex; flex-direction: column; gap: 3px; }
+.toggleRow small { color: var(--text-muted); line-height: 1.4; }
+.toggleRow input { width: 18px; height: 18px; accent-color: var(--lime); }
+
+.checkInSchedule {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.checkInSummary {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--lime);
+}
+
 .checkRow {
   display: flex;
   align-items: center;
@@ -444,6 +505,7 @@
   .dateNav { width: 100%; justify-content: space-between; }
   .dateTitle { min-width: 0; flex: 1; font-size: 12px; }
   .formGrid { grid-template-columns: 1fr; }
+  .checkInSchedule { grid-template-columns: 1fr; }
   .fieldWide { grid-column: auto; }
   .task { grid-template-columns: 70px minmax(0, 1fr); }
   .taskActions { grid-column: 2; flex-wrap: wrap; }

@@ -38,4 +38,4 @@ cron.schedule('30 6 * * *', async () => {
   }
 });
 
-console.log('VERA Scheduler running. Task checks run every minute; gym reminder runs at 6:30 AM.');
+console.log('VERA Scheduler running. Task and focus-email checks run every minute; gym reminder runs at 6:30 AM.');
