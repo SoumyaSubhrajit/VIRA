@@ -84,6 +84,20 @@ export default function DashboardShell() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <Link
+            href="/scheduler"
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '11px',
+              fontWeight: 600,
+              letterSpacing: '1.5px',
+              textTransform: 'uppercase',
+              color: 'var(--lime)',
+              textDecoration: 'none',
+            }}
+          >
+            Daily Command →
+          </Link>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-dim)' }}>
             LAST SYNC: {lastSynced ? lastSynced.toLocaleTimeString('en-US', { hour12: false }) : '--:--:--'}
           </span>

@@ -20,6 +20,11 @@
 # production
 /build
 
+# local VIRA databases
+/data/*.sqlite
+/data/*.sqlite-shm
+/data/*.sqlite-wal
+
 # misc
 .DS_Store
 *.pem
