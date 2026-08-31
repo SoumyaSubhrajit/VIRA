@@ -221,6 +221,35 @@
   color: var(--amber);
 }
 
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panelHeader .panelTitle { margin-bottom: 14px; }
+
+.connectionBadge {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 3px 8px;
+  border: 1px solid var(--lime);
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+
+.connectionBadgeIdle {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
 .agenda {
   display: flex;
   flex-direction: column;
@@ -464,6 +493,145 @@
   color: var(--lime);
 }
 
+.googleSetup,
+.googleConnected {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.googleSetup p { margin: 0 0 12px; }
+.googleSetup ol,
+.googleSetup ul { margin: 0 0 13px; padding-left: 20px; }
+.googleSetup li { margin: 5px 0; }
+
+.googleSetup code {
+  display: block;
+  margin: 10px 0 14px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--lime);
+}
+
+.buttonLink,
+.buttonLinkPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--text-muted);
+}
+
+.buttonLinkPrimary {
+  border-color: var(--lime);
+  background: var(--lime-dim);
+  color: var(--lime);
+}
+
+.googleIdentity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 13px;
+  padding: 11px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-inset);
+}
+
+.googleIdentity > span:last-child,
+.integrationRow > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.googleIdentity small,
+.integrationRow small { color: var(--text-dim); }
+
+.googleMark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--blue);
+  border-radius: 50%;
+  font-family: Arial, sans-serif;
+  font-weight: 800;
+  color: var(--blue);
+}
+
+.integrationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.integrationRow input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--lime);
+}
+
+.googleActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.googleAgendaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.googleSectionTitle {
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
+.googleAgendaItem {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.googleAgendaItem:hover strong { color: var(--lime); }
+.googleAgendaItem > span:last-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.googleAgendaItem strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px var(--font-mono); }
+.googleAgendaItem small,
+.googleItemTime,
+.googleTaskMark,
+.googleEmpty { font: 10px/1.5 var(--font-mono); color: var(--text-dim); }
+.googleTaskMark { color: var(--lime); font-size: 14px; }
+.googleItemComplete { opacity: 0.55; }
+.googleItemComplete strong { text-decoration: line-through; }
+.googleEmpty { padding: 15px 0; }
+
 .checkRow {
   display: flex;
   align-items: center;
@@ -494,6 +662,7 @@
   .workspace { grid-template-columns: 1fr; }
   .commandStrip { grid-template-columns: 1fr; }
   .modeGrid { grid-template-columns: 1fr; }
+  .googleAgendaGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {

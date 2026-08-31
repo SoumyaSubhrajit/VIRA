@@ -55,9 +55,37 @@ Task reminders and focus check-ins use the same responsive mission-briefing emai
 
 The reminder email address and focus window are configured from the scheduler page and saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
 
+## Google Calendar, Tasks, and Gmail
+
+VIRA supports one secure Google OAuth connection for `soumyasubhrajit@gmail.com`:
+
+- Timed VIRA tasks are created and updated in the primary Google Calendar.
+- Tasks are mirrored into a dedicated **VIRA Daily Command** Google Tasks list.
+- Calendar events and Google Tasks appear inside the Daily Command page.
+- Reminder emails use Gmail send-only access first, with Resend as fallback.
+
+One-time Google Cloud setup:
+
+1. Create or select a project in [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable **Google Calendar API**, **Google Tasks API**, and **Gmail API**.
+3. Configure the OAuth consent screen. While the app is in testing, add `soumyasubhrajit@gmail.com` as a test user.
+4. Create an OAuth client with application type **Web application**.
+5. Add this authorized redirect URI exactly: `http://localhost:3100/api/google/callback`.
+6. Add the generated values to `.env.local`:
+
+```text
+GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:3100/api/google/callback
+GOOGLE_ACCOUNT_EMAIL=soumyasubhrajit@gmail.com
+```
+
+Restart VIRA, open `/scheduler`, and select **Connect Google account** in Google Command Center. OAuth refresh tokens are AES-256-GCM encrypted before being stored in the ignored local SQLite database; the Google password is never handled or stored by VIRA.
+
 ## Architecture Notes
 - All Excel parsing happens server-side in API routes (`/api/gym`, etc.).
 - The AI Guide uses `gemini-2.0-flash` to process a summary of all panels.
 - Agent memory is persisted to `data/agent_memory.json`.
 - Daily Command data is persisted in a local SQLite database and accessed through `/api/scheduler/*` route handlers.
+- Google integration uses Google's Node.js OAuth client with the documented Calendar, Tasks, and Gmail REST endpoints, offline OAuth, encrypted refresh-token storage, state validation, and narrow Calendar-events, Tasks, Gmail-send, and identity scopes.
 - The data layer (`src/lib/`) abstracts file access and accepts a `userId`, making the app structurally ready for multi-tenancy in the future.

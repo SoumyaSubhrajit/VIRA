@@ -11,6 +11,7 @@ import type {
   SchedulerTask,
   TaskStatus,
 } from '@/lib/scheduler/types';
+import type { GoogleAgendaSnapshot, GoogleConnectionStatus, GoogleSyncResult } from '@/lib/google/types';
 import styles from './scheduler.module.css';
 
 const MODE_CLASS: Record<PersonalityId, string> = {
@@ -49,6 +50,12 @@ function formatTime12(time: string): string {
   const [hours, minutes] = time.split(':').map(Number);
   const period = hours >= 12 ? 'PM' : 'AM';
   return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
+function formatGoogleDateTime(value: string): string {
+  if (!value) return 'Time unavailable';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'All day';
+  return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 function addMinutes24(time: string, amount: number): string {
@@ -138,6 +145,9 @@ export default function SchedulerPage() {
   const [checkInEnabled, setCheckInEnabled] = useState(true);
   const [checkInStartTime, setCheckInStartTime] = useState('08:00');
   const [checkInEndTime, setCheckInEndTime] = useState('22:00');
+  const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
+  const [googleAgenda, setGoogleAgenda] = useState<GoogleAgendaSnapshot | null>(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -160,6 +170,27 @@ export default function SchedulerPage() {
     }
   }, []);
 
+  const loadGoogle = useCallback(async (date: string) => {
+    try {
+      const statusResponse = await fetch('/api/google/status', { cache: 'no-store' });
+      const statusBody = await statusResponse.json();
+      if (!statusResponse.ok) throw new Error(statusBody.error ?? 'Failed to load Google status.');
+      const status = statusBody as GoogleConnectionStatus;
+      setGoogleStatus(status);
+      if (!status.connected) {
+        setGoogleAgenda(null);
+        return;
+      }
+      const agendaResponse = await fetch(`/api/google/agenda?date=${encodeURIComponent(date)}`, { cache: 'no-store' });
+      const agendaBody = await agendaResponse.json();
+      if (!agendaResponse.ok) throw new Error(agendaBody.error ?? 'Failed to load Google agenda.');
+      setGoogleAgenda(agendaBody as GoogleAgendaSnapshot);
+    } catch (googleError) {
+      console.error('[scheduler/google]', googleError);
+      setGoogleAgenda(null);
+    }
+  }, []);
+
   useEffect(() => {
     setSelectedDate(localDateKey());
     setNow(new Date());
@@ -169,6 +200,18 @@ export default function SchedulerPage() {
   useEffect(() => {
     if (selectedDate) load(selectedDate);
   }, [load, selectedDate]);
+  useEffect(() => {
+    if (selectedDate) loadGoogle(selectedDate);
+  }, [loadGoogle, selectedDate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleResult = params.get('google');
+    if (googleResult === 'connected') setSuccess('Google connected. Calendar, Tasks, and Gmail sync are active.');
+    if (googleResult === 'wrong-account') setError('Wrong Google account selected. Connect the exact account shown in Google Command Center.');
+    if (googleResult === 'error') setError('Google connection failed. Check the OAuth setup and try again.');
+    if (googleResult) window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -233,12 +276,15 @@ export default function SchedulerPage() {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Failed to save task.');
+      const googleSync = body.googleSync as GoogleSyncResult | undefined;
       setForm((current) => {
         const startTime = current.endTime || current.startTime;
         return { ...EMPTY_FORM, startTime, endTime: addMinutes24(startTime, 60) };
       });
-      setSuccess('Task saved to the scheduler database.');
-      await load(selectedDate);
+      const synced = googleSync?.calendar === 'synced' || googleSync?.tasks === 'synced';
+      setSuccess(synced ? 'Task saved and synced with Google.' : 'Task saved to the scheduler database.');
+      if (googleSync?.error) setError(`Task saved locally. Google sync needs attention: ${googleSync.error}`);
+      await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save task.');
     } finally {
@@ -248,6 +294,7 @@ export default function SchedulerPage() {
 
   async function updateStatus(task: SchedulerTask, status: TaskStatus) {
     setError('');
+    setSuccess('');
     const response = await fetch(`/api/scheduler/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -258,7 +305,10 @@ export default function SchedulerPage() {
       setError(body.error ?? 'Failed to update task.');
       return;
     }
-    await load(selectedDate);
+    const googleSync = body.googleSync as GoogleSyncResult | undefined;
+    if (googleSync?.error) setError(`Status saved locally. Google sync needs attention: ${googleSync.error}`);
+    else if (googleSync?.calendar === 'synced' || googleSync?.tasks === 'synced') setSuccess('Status updated in VIRA and Google.');
+    await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
   }
 
   async function removeTask(task: SchedulerTask) {
@@ -269,7 +319,7 @@ export default function SchedulerPage() {
       setError(body.error ?? 'Failed to delete task.');
       return;
     }
-    await load(selectedDate);
+    await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
   }
 
   async function saveSettings() {
@@ -317,6 +367,65 @@ export default function SchedulerPage() {
     });
     setSuccess('Browser reminders enabled for this device.');
     await load(selectedDate);
+  }
+
+  async function updateGooglePreference(
+    key: 'calendarSyncEnabled' | 'tasksSyncEnabled' | 'gmailSendEnabled',
+    value: boolean
+  ) {
+    setGoogleBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/google/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to update Google preferences.');
+      setGoogleStatus(body as GoogleConnectionStatus);
+    } catch (googleError) {
+      setError(googleError instanceof Error ? googleError.message : 'Failed to update Google preferences.');
+    } finally {
+      setGoogleBusy(false);
+    }
+  }
+
+  async function syncGoogleNow() {
+    setGoogleBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/google/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: selectedDate }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Google sync failed.');
+      setSuccess(`Google sync complete: ${body.synced} task${body.synced === 1 ? '' : 's'} updated${body.failed ? `, ${body.failed} failed` : ''}.`);
+      await loadGoogle(selectedDate);
+    } catch (googleError) {
+      setError(googleError instanceof Error ? googleError.message : 'Google sync failed.');
+    } finally {
+      setGoogleBusy(false);
+    }
+  }
+
+  async function disconnectGoogle() {
+    if (!window.confirm('Disconnect Google and remove locally stored OAuth tokens? Existing Google events and tasks will remain.')) return;
+    setGoogleBusy(true);
+    try {
+      const response = await fetch('/api/google/status', { method: 'DELETE' });
+      if (!response.ok) throw new Error('Google disconnect failed.');
+      setGoogleAgenda(null);
+      await loadGoogle(selectedDate);
+      setSuccess('Google account disconnected.');
+    } catch (googleError) {
+      setError(googleError instanceof Error ? googleError.message : 'Google disconnect failed.');
+    } finally {
+      setGoogleBusy(false);
+    }
   }
 
   return (
@@ -430,6 +539,49 @@ export default function SchedulerPage() {
                 ))}
               </div>
             </section>
+
+            {googleStatus?.connected && (
+              <section className={styles.panel}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.panelTitle}>Google agenda</h2>
+                  <span className={styles.connectionBadge}>Live</span>
+                </div>
+                {!googleAgenda ? (
+                  <div className={styles.empty}>Loading Google Calendar and Tasks...</div>
+                ) : (
+                  <div className={styles.googleAgendaGrid}>
+                    <div>
+                      <div className={styles.googleSectionTitle}>Calendar</div>
+                      {googleAgenda.events.length === 0 ? (
+                        <div className={styles.googleEmpty}>No Google Calendar events for this date.</div>
+                      ) : googleAgenda.events.map((event) => (
+                        <a key={event.id} className={styles.googleAgendaItem} href={event.htmlLink ?? '#'} target="_blank" rel="noreferrer">
+                          <span className={styles.googleItemTime}>{formatGoogleDateTime(event.start)}</span>
+                          <span>
+                            <strong>{event.title}</strong>
+                            <small>{event.fromVira ? 'Synced from VIRA' : 'Google Calendar'}</small>
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                    <div>
+                      <div className={styles.googleSectionTitle}>Google Tasks</div>
+                      {googleAgenda.tasks.length === 0 ? (
+                        <div className={styles.googleEmpty}>No due or undated Google Tasks.</div>
+                      ) : googleAgenda.tasks.map((task) => (
+                        <a key={task.id} className={`${styles.googleAgendaItem} ${task.status === 'completed' ? styles.googleItemComplete : ''}`} href={task.webViewLink ?? '#'} target="_blank" rel="noreferrer">
+                          <span className={styles.googleTaskMark}>{task.status === 'completed' ? '✓' : '○'}</span>
+                          <span>
+                            <strong>{task.title}</strong>
+                            <small>{task.fromVira ? 'Synced from VIRA' : 'Google Tasks'}</small>
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
           </div>
 
           <aside className={styles.column}>
@@ -488,7 +640,7 @@ export default function SchedulerPage() {
 
             <section className={styles.panel}>
               <h2 className={styles.panelTitle}>Reminder system</h2>
-              <p className={styles.settingsHint}>Your address and schedule stay in the local database. Email delivery uses the configured Resend account.</p>
+              <p className={styles.settingsHint}>Your address and schedule stay in the local database. Connected Gmail is used first, with Resend as fallback.</p>
               <div className={styles.settingRow}>
                 <input className={styles.input} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
               </div>
@@ -515,6 +667,62 @@ export default function SchedulerPage() {
                 <button className={styles.buttonPrimary} disabled={saving || !email.trim()} onClick={saveSettings}>{saving ? 'Saving...' : 'Save email schedule'}</button>
                 <button className={styles.button} onClick={enableBrowserReminders}>Enable browser reminders</button>
               </div>
+            </section>
+
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2 className={styles.panelTitle}>Google Command Center</h2>
+                <span className={`${styles.connectionBadge} ${googleStatus?.connected ? '' : styles.connectionBadgeIdle}`}>
+                  {googleStatus?.connected ? 'Connected' : googleStatus?.configured ? 'Ready' : 'Setup required'}
+                </span>
+              </div>
+              {!googleStatus ? (
+                <div className={styles.empty}>Checking Google connection...</div>
+              ) : !googleStatus.configured ? (
+                <div className={styles.googleSetup}>
+                  <p>One Google Cloud OAuth client is required. VIRA requests only Calendar events, Google Tasks, Gmail send-only, and account identity.</p>
+                  <ol>
+                    <li>Enable Calendar API, Tasks API, and Gmail API.</li>
+                    <li>Create a Web OAuth client and add this redirect URI:</li>
+                  </ol>
+                  <code>{googleStatus.redirectUri}</code>
+                  <p>Add <strong>GOOGLE_CLIENT_ID</strong> and <strong>GOOGLE_CLIENT_SECRET</strong> to <strong>.env.local</strong>, then restart VIRA.</p>
+                  <a className={styles.buttonLink} href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Open Google Cloud setup →</a>
+                </div>
+              ) : !googleStatus.connected ? (
+                <div className={styles.googleSetup}>
+                  <p>Connect <strong>{googleStatus.expectedEmail}</strong>. VIRA will reject a different Google account.</p>
+                  <ul>
+                    <li>Create and update Calendar events.</li>
+                    <li>Create and update tasks in “VIRA Daily Command”.</li>
+                    <li>Send reminders from your Gmail account.</li>
+                  </ul>
+                  <a className={styles.buttonLinkPrimary} href="/api/google/connect">Connect Google account →</a>
+                </div>
+              ) : (
+                <div className={styles.googleConnected}>
+                  <div className={styles.googleIdentity}>
+                    <span className={styles.googleMark}>G</span>
+                    <span><strong>{googleStatus.email}</strong><small>OAuth tokens encrypted locally</small></span>
+                  </div>
+                  <label className={styles.integrationRow}>
+                    <span><strong>Google Calendar</strong><small>Mirror timed VIRA tasks as events</small></span>
+                    <input type="checkbox" disabled={googleBusy} checked={googleStatus.calendarSyncEnabled} onChange={(event) => updateGooglePreference('calendarSyncEnabled', event.target.checked)} />
+                  </label>
+                  <label className={styles.integrationRow}>
+                    <span><strong>Google Tasks</strong><small>Mirror status and due dates</small></span>
+                    <input type="checkbox" disabled={googleBusy} checked={googleStatus.tasksSyncEnabled} onChange={(event) => updateGooglePreference('tasksSyncEnabled', event.target.checked)} />
+                  </label>
+                  <label className={styles.integrationRow}>
+                    <span><strong>Gmail reminders</strong><small>Send from your own account</small></span>
+                    <input type="checkbox" disabled={googleBusy} checked={googleStatus.gmailSendEnabled} onChange={(event) => updateGooglePreference('gmailSendEnabled', event.target.checked)} />
+                  </label>
+                  <div className={styles.googleActions}>
+                    <button className={styles.buttonPrimary} disabled={googleBusy} onClick={syncGoogleNow}>{googleBusy ? 'Syncing...' : 'Sync this day'}</button>
+                    <button className={styles.buttonDanger} disabled={googleBusy} onClick={disconnectGoogle}>Disconnect</button>
+                  </div>
+                </div>
+              )}
             </section>
           </aside>
         </div>
