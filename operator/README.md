@@ -51,6 +51,8 @@ npm run scheduler
 
 Task times use explicit 12-hour hour/minute/AM-PM controls while the database stores normalized 24-hour values. The reminder panel also supports a daily two-hour focus email, enabled by default from 8:00 AM through 10:00 PM; both boundaries are adjustable.
 
+Task reminders and focus check-ins use the same responsive mission-briefing email template: objective, time window, operating mode, priority, command directive, and review questions are presented directly inside the email.
+
 The reminder email address and focus window are configured from the scheduler page and saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
 
 ## Architecture Notes
