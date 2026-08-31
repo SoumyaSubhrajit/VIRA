@@ -148,6 +148,7 @@ export default function SchedulerPage() {
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
   const [googleAgenda, setGoogleAgenda] = useState<GoogleAgendaSnapshot | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -309,6 +310,30 @@ export default function SchedulerPage() {
     if (googleSync?.error) setError(`Status saved locally. Google sync needs attention: ${googleSync.error}`);
     else if (googleSync?.calendar === 'synced' || googleSync?.tasks === 'synced') setSuccess('Status updated in VIRA and Google.');
     await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
+  }
+
+  async function updateTaskMode(task: SchedulerTask, personalityId: PersonalityId) {
+    if (personalityId === task.personalityId) return;
+    setUpdatingTaskId(task.id);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch(`/api/scheduler/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personalityId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to change task mode.');
+      const googleSync = body.googleSync as GoogleSyncResult | undefined;
+      await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
+      if (googleSync?.error) setError(`Mode changed locally. Google sync needs attention: ${googleSync.error}`);
+      else setSuccess(`Mode changed to ${personalityMap[personalityId]?.shortName ?? personalityId}.`);
+    } catch (modeError) {
+      setError(modeError instanceof Error ? modeError.message : 'Failed to change task mode.');
+    } finally {
+      setUpdatingTaskId(null);
+    }
   }
 
   async function removeTask(task: SchedulerTask) {
@@ -498,7 +523,7 @@ export default function SchedulerPage() {
                           {formatTime12(task.startTime)}
                           {task.endTime && <span className={styles.taskEnd}>to {formatTime12(task.endTime)}</span>}
                         </div>
-                        <div>
+                        <div className={styles.taskMain}>
                           <h3 className={styles.taskTitle}>{task.title}</h3>
                           {task.details && <p className={styles.taskDetails}>{task.details}</p>}
                           <div className={styles.taskMeta}>
@@ -509,16 +534,31 @@ export default function SchedulerPage() {
                           </div>
                         </div>
                         <div className={styles.taskActions}>
-                          {task.status !== 'completed' && (
-                            <button className={styles.statusButton} onClick={() => updateStatus(task, 'completed')}>Done</button>
-                          )}
-                          {task.status !== 'skipped' && (
-                            <button className={styles.statusButton} onClick={() => updateStatus(task, 'skipped')}>Skip</button>
-                          )}
-                          {task.status !== 'planned' && (
-                            <button className={styles.statusButton} onClick={() => updateStatus(task, 'planned')}>Reset</button>
-                          )}
-                          <button className={styles.buttonDanger} onClick={() => removeTask(task)}>Delete</button>
+                          <label className={styles.taskModeControl}>
+                            <span>Change mode</span>
+                            <select
+                              aria-label={`Change mode for ${task.title}`}
+                              value={task.personalityId}
+                              disabled={updatingTaskId === task.id}
+                              onChange={(event) => updateTaskMode(task, event.target.value as PersonalityId)}
+                            >
+                              {personalities.map((personality) => (
+                                <option key={personality.id} value={personality.id}>{personality.shortName}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className={styles.taskStateActions}>
+                            {task.status !== 'completed' && (
+                              <button className={styles.statusButton} onClick={() => updateStatus(task, 'completed')}>Done</button>
+                            )}
+                            {task.status !== 'skipped' && (
+                              <button className={styles.statusButton} onClick={() => updateStatus(task, 'skipped')}>Skip</button>
+                            )}
+                            {task.status !== 'planned' && (
+                              <button className={styles.statusButton} onClick={() => updateStatus(task, 'planned')}>Reset</button>
+                            )}
+                            <button className={styles.buttonDanger} onClick={() => removeTask(task)}>Delete</button>
+                          </div>
                         </div>
                       </article>
                     );
@@ -593,6 +633,21 @@ export default function SchedulerPage() {
                     <span className={styles.label}>Task</span>
                     <input className={styles.input} value={form.title} maxLength={140} required onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Define a concrete outcome" />
                   </label>
+                  <label className={`${styles.fieldWide} ${styles.descriptionField}`}>
+                    <span className={styles.labelRow}>
+                      <span className={styles.label}>Task description / definition of done</span>
+                      <span className={styles.characterCount}>{form.details.length}/2000</span>
+                    </span>
+                    <textarea
+                      className={styles.textarea}
+                      value={form.details}
+                      maxLength={2000}
+                      rows={6}
+                      onChange={(event) => setForm({ ...form, details: event.target.value })}
+                      placeholder="Describe the result, steps, context, dependencies, and what finished looks like..."
+                    />
+                    <span className={styles.fieldHint}>Write enough detail that you can execute without deciding again later.</span>
+                  </label>
                   <Time12Field label="Start" value={form.startTime} wide onChange={(startTime) => setForm({ ...form, startTime })} />
                   <Time12Field label="End" value={form.endTime} wide onChange={(endTime) => setForm({ ...form, endTime })} />
                   <label className={styles.fieldWide}>
@@ -626,10 +681,6 @@ export default function SchedulerPage() {
                       <option value="in_app">Browser only</option>
                       <option value="email">Email only</option>
                     </select>
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span className={styles.label}>Details</span>
-                    <textarea className={styles.textarea} value={form.details} maxLength={2000} onChange={(event) => setForm({ ...form, details: event.target.value })} placeholder="What exactly must be finished?" />
                   </label>
                 </div>
                 <div className={styles.formActions}>
