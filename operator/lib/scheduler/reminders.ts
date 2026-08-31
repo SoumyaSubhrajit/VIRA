@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { sendWithConnectedGmail } from '@/lib/google/gmail';
 import {
   getPendingReminderTasks,
   getSchedulerSettings,
@@ -77,6 +78,30 @@ export interface ReminderDispatchResult {
   reason?: string;
 }
 
+async function deliverEmail(input: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  resend: Resend | null;
+  from: string;
+}): Promise<{ sent: boolean; error?: string }> {
+  const gmail = await sendWithConnectedGmail(input);
+  if (gmail.sent) return { sent: true };
+
+  if (!input.resend) {
+    return { sent: false, error: gmail.error ?? 'Neither connected Gmail nor RESEND_API_KEY is available.' };
+  }
+  const response = await input.resend.emails.send({
+    from: input.from,
+    to: [input.to],
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+  });
+  return response.error ? { sent: false, error: response.error.message } : { sent: true };
+}
+
 export async function dispatchDueReminders(now = new Date()): Promise<ReminderDispatchResult> {
   const settings = getSchedulerSettings();
   if (!settings.emailEnabled || !settings.reminderEmail) {
@@ -84,11 +109,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
   }
 
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return { sent: 0, failed: 0, skipped: 1, reason: 'RESEND_API_KEY is not configured.' };
-  }
-
-  const resend = new Resend(apiKey);
+  const resend = apiKey ? new Resend(apiKey) : null;
   const from = process.env.REMINDER_FROM_EMAIL || 'VIRA Scheduler <onboarding@resend.dev>';
   const tasks = getPendingReminderTasks(now);
   let sent = 0;
@@ -99,11 +120,9 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
   for (const task of tasks) {
     const personality = PERSONALITY_BY_ID[task.personalityId];
     const timeLabel = `${formatTime12(task.startTime)}${task.endTime ? ` — ${formatTime12(task.endTime)}` : ''}`;
-    const response = await resend.emails.send({
-      from,
-      to: [settings.reminderEmail],
-      subject: `MISSION BRIEF // ${formatTime12(task.startTime)} // ${task.title.toUpperCase()}`,
-      html: renderMissionEmail({
+    const subject = `MISSION BRIEF // ${formatTime12(task.startTime)} // ${task.title.toUpperCase()}`;
+    const directive = `${personality.identityStatement}\n\nYou put this objective on the schedule. Execute it. Do not renegotiate with avoidance.`;
+    const html = renderMissionEmail({
         kind: 'task',
         eyebrow: `${personality.shortName} assignment`,
         headline: 'Your objective is live.',
@@ -111,15 +130,22 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
         timeLabel,
         modeLabel: personality.shortName,
         priorityLabel: `P${task.priority}`,
-        directive: `${personality.identityStatement}\n\nYou put this objective on the schedule. Execute it. Do not renegotiate with avoidance.`,
+        directive,
         details: task.details || undefined,
         scheduleLabel: `Task reminder · ${task.reminderMinutes} minute${task.reminderMinutes === 1 ? '' : 's'} before start · ${settings.timezone}`,
-      }),
+      });
+    const response = await deliverEmail({
+      to: settings.reminderEmail,
+      subject,
+      html,
+      text: `VIRA MISSION BRIEF\n\nOBJECTIVE: ${task.title}\nTIME: ${timeLabel}\nMODE: ${personality.shortName} · P${task.priority}\n\n${directive}\n\n${task.details}`,
+      resend,
+      from,
     });
 
-    if (response.error) {
+    if (!response.sent) {
       failed += 1;
-      console.error('[scheduler/reminder] Send failed', { taskId: task.id, message: response.error.message });
+      console.error('[scheduler/reminder] Send failed', { taskId: task.id, message: response.error });
     } else {
       sent += 1;
       taskRemindersSent += 1;
@@ -135,11 +161,11 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
     const personality = focusTask ? PERSONALITY_BY_ID[focusTask.personalityId] : null;
     const objective = focusTask?.title ?? 'Define and finish the next concrete outcome.';
     const isCurrent = focusTask ? new Date(focusTask.scheduledAt).getTime() <= now.getTime() : false;
-    const response = await resend.emails.send({
-      from,
-      to: [settings.reminderEmail],
-      subject: `VIRA DIRECTIVE // RETURN TO OBJECTIVE // ${formatTime12(slotTime)}`,
-      html: renderMissionEmail({
+    const subject = `VIRA DIRECTIVE // RETURN TO OBJECTIVE // ${formatTime12(slotTime)}`;
+    const directive = focusTask && personality
+      ? `${isCurrent ? 'Current' : 'Next'} commitment identified. ${personality.identityStatement}\n\nFinish the measurable result. Motion without completion does not count.`
+      : 'No objective is filed. Open Daily Command, choose the one result that matters, and commit the next two hours to finishing it.';
+    const html = renderMissionEmail({
         kind: 'check-in',
         eyebrow: 'Two-hour command review',
         headline: 'Stop drifting. Return to the objective.',
@@ -149,9 +175,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
           : `${formatTime12(slotTime)} checkpoint`,
         modeLabel: personality?.shortName ?? 'Builder',
         priorityLabel: focusTask ? `P${focusTask.priority}` : 'DIRECTIVE',
-        directive: focusTask && personality
-          ? `${isCurrent ? 'Current' : 'Next'} commitment identified. ${personality.identityStatement}\n\nFinish the measurable result. Motion without completion does not count.`
-          : 'No objective is filed. Open Daily Command, choose the one result that matters, and commit the next two hours to finishing it.',
+        directive,
         details: focusTask?.details || undefined,
         questions: [
           'What did you actually finish in the last two hours?',
@@ -159,12 +183,19 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
           'Is your current action serving that result—or avoiding it?',
         ],
         scheduleLabel: `Automatic checkpoint every ${settings.checkInIntervalHours} hours · ${formatTime12(settings.checkInStartTime)}–${formatTime12(settings.checkInEndTime)} · ${settings.timezone}`,
-      }),
+      });
+    const response = await deliverEmail({
+      to: settings.reminderEmail,
+      subject,
+      html,
+      text: `VIRA TWO-HOUR DIRECTIVE\n\nOBJECTIVE: ${objective}\nCHECKPOINT: ${formatTime12(slotTime)}\nMODE: ${personality?.shortName ?? 'Builder'}\n\n${directive}\n\n1. What did you actually finish?\n2. What measurable result comes next?\n3. Are you executing or avoiding?`,
+      resend,
+      from,
     });
 
-    if (response.error) {
+    if (!response.sent) {
       failed += 1;
-      console.error('[scheduler/check-in] Send failed', { slot: checkInSlot, message: response.error.message });
+      console.error('[scheduler/check-in] Send failed', { slot: checkInSlot, message: response.error });
     } else {
       sent += 1;
       focusCheckInsSent += 1;
