@@ -6,17 +6,9 @@ import {
   markCheckInSent,
   markReminderSent,
 } from './db';
+import { formatTime12, renderMissionEmail } from './emailTemplate';
 import { PERSONALITY_BY_ID } from './personalities';
 import type { SchedulerSettings, SchedulerTask } from './types';
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
 
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
@@ -25,13 +17,6 @@ function timeToMinutes(time: string): number {
 
 function minutesToTime(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-}
-
-function formatTime12(time: string): string {
-  const [hours, minutes] = time.split(':').map(Number);
-  const period = hours >= 12 ? 'PM' : 'AM';
-  const hour = hours % 12 || 12;
-  return `${hour}:${String(minutes).padStart(2, '0')} ${period}`;
 }
 
 function zonedParts(now: Date, timezone: string): { dateKey: string; minutes: number } {
@@ -113,20 +98,23 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
 
   for (const task of tasks) {
     const personality = PERSONALITY_BY_ID[task.personalityId];
+    const timeLabel = `${formatTime12(task.startTime)}${task.endTime ? ` — ${formatTime12(task.endTime)}` : ''}`;
     const response = await resend.emails.send({
       from,
       to: [settings.reminderEmail],
-      subject: `[VIRA / ${personality.shortName.toUpperCase()}] ${formatTime12(task.startTime)} — ${task.title}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;color:#20231d">
-          <p style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#68705e">VIRA daily command</p>
-          <h1 style="font-size:24px;margin:8px 0">${escapeHtml(task.title)}</h1>
-          <p><strong>${escapeHtml(formatTime12(task.startTime))}${task.endTime ? `–${escapeHtml(formatTime12(task.endTime))}` : ''}</strong> · ${escapeHtml(personality.shortName)}</p>
-          <p style="padding:14px;background:#f2f4ed;border-left:4px solid #718c26">${escapeHtml(personality.identityStatement)}</p>
-          ${task.details ? `<p>${escapeHtml(task.details).replaceAll('\n', '<br/>')}</p>` : ''}
-          <p style="font-size:12px;color:#68705e">Reminder sent ${task.reminderMinutes} minute${task.reminderMinutes === 1 ? '' : 's'} before the scheduled task.</p>
-        </div>
-      `,
+      subject: `MISSION BRIEF // ${formatTime12(task.startTime)} // ${task.title.toUpperCase()}`,
+      html: renderMissionEmail({
+        kind: 'task',
+        eyebrow: `${personality.shortName} assignment`,
+        headline: 'Your objective is live.',
+        objective: task.title,
+        timeLabel,
+        modeLabel: personality.shortName,
+        priorityLabel: `P${task.priority}`,
+        directive: `${personality.identityStatement}\n\nYou put this objective on the schedule. Execute it. Do not renegotiate with avoidance.`,
+        details: task.details || undefined,
+        scheduleLabel: `Task reminder · ${task.reminderMinutes} minute${task.reminderMinutes === 1 ? '' : 's'} before start · ${settings.timezone}`,
+      }),
     });
 
     if (response.error) {
@@ -145,29 +133,33 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
     const slotTime = checkInSlot.slice(11);
     const focusTask = taskForCheckIn(getTasksForDate(dateKey), now);
     const personality = focusTask ? PERSONALITY_BY_ID[focusTask.personalityId] : null;
+    const objective = focusTask?.title ?? 'Define and finish the next concrete outcome.';
+    const isCurrent = focusTask ? new Date(focusTask.scheduledAt).getTime() <= now.getTime() : false;
     const response = await resend.emails.send({
       from,
       to: [settings.reminderEmail],
-      subject: `[VIRA CHECK-IN] Return to the work — ${formatTime12(slotTime)}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;color:#20231d">
-          <p style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#68705e">VIRA · two-hour focus reset</p>
-          <h1 style="font-size:24px;margin:8px 0">Stop drifting. Return to the work.</h1>
-          ${focusTask && personality ? `
-            <p>Your ${new Date(focusTask.scheduledAt).getTime() <= now.getTime() ? 'current' : 'next'} commitment:</p>
-            <p style="padding:14px;background:#f2f4ed;border-left:4px solid #718c26">
-              <strong>${escapeHtml(formatTime12(focusTask.startTime))} — ${escapeHtml(focusTask.title)}</strong><br/>
-              ${escapeHtml(personality.shortName)}: ${escapeHtml(personality.identityStatement)}
-            </p>
-          ` : '<p>No task is scheduled. Decide the single concrete outcome for the next two hours and put it in Daily Command now.</p>'}
-          <ol>
-            <li>What did you actually finish in the last two hours?</li>
-            <li>What one measurable result will be finished in the next two?</li>
-            <li>Is your current action serving that result—or avoiding it?</li>
-          </ol>
-          <p style="font-size:12px;color:#68705e">Scheduled every ${settings.checkInIntervalHours} hours, ${escapeHtml(formatTime12(settings.checkInStartTime))}–${escapeHtml(formatTime12(settings.checkInEndTime))} (${escapeHtml(settings.timezone)}).</p>
-        </div>
-      `,
+      subject: `VIRA DIRECTIVE // RETURN TO OBJECTIVE // ${formatTime12(slotTime)}`,
+      html: renderMissionEmail({
+        kind: 'check-in',
+        eyebrow: 'Two-hour command review',
+        headline: 'Stop drifting. Return to the objective.',
+        objective,
+        timeLabel: focusTask
+          ? `${formatTime12(focusTask.startTime)}${focusTask.endTime ? ` — ${formatTime12(focusTask.endTime)}` : ''}`
+          : `${formatTime12(slotTime)} checkpoint`,
+        modeLabel: personality?.shortName ?? 'Builder',
+        priorityLabel: focusTask ? `P${focusTask.priority}` : 'DIRECTIVE',
+        directive: focusTask && personality
+          ? `${isCurrent ? 'Current' : 'Next'} commitment identified. ${personality.identityStatement}\n\nFinish the measurable result. Motion without completion does not count.`
+          : 'No objective is filed. Open Daily Command, choose the one result that matters, and commit the next two hours to finishing it.',
+        details: focusTask?.details || undefined,
+        questions: [
+          'What did you actually finish in the last two hours?',
+          'What one measurable result will be finished in the next two?',
+          'Is your current action serving that result—or avoiding it?',
+        ],
+        scheduleLabel: `Automatic checkpoint every ${settings.checkInIntervalHours} hours · ${formatTime12(settings.checkInStartTime)}–${formatTime12(settings.checkInEndTime)} · ${settings.timezone}`,
+      }),
     });
 
     if (response.error) {
