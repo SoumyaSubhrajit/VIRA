@@ -28,8 +28,20 @@ interface GoogleTaskResource {
   webViewLink?: string;
 }
 
+function kolkataDateKey(value: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 function endTimestamp(task: SchedulerTask): string {
   const start = new Date(task.scheduledAt).getTime();
+  if (task.endAt) return task.endAt;
   if (!task.endTime) return new Date(start + 60 * 60_000).toISOString();
   const [startHour, startMinute] = task.startTime.split(':').map(Number);
   const [endHour, endMinute] = task.endTime.split(':').map(Number);
@@ -72,7 +84,7 @@ function googleTask(task: SchedulerTask): GoogleTaskResource {
   const resource: GoogleTaskResource = {
     title: `${skipped ? '[SKIPPED] ' : ''}[${personality.shortName}] ${task.title}`,
     notes: [
-      `${task.startTime}${task.endTime ? `–${task.endTime}` : ''} · P${task.priority}`,
+      `${task.startTime}${task.endTime ? `–${task.endTime}${task.endAt && kolkataDateKey(task.endAt) !== task.taskDate ? ' next day' : ''}` : ''} · P${task.priority}`,
       personality.identityStatement,
       task.details,
       `VIRA-ID: ${task.id}`,

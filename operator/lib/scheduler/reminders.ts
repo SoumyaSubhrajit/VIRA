@@ -1,10 +1,11 @@
 import { Resend } from 'resend';
 import { sendWithConnectedGmail } from '@/lib/google/gmail';
 import {
+  getDayPlan,
   getPendingReminderTasks,
   getSchedulerSettings,
   getTasksForDate,
-  markCheckInSent,
+  markDayPlanHourlySent,
   markReminderSent,
 } from './db';
 import { formatTime12, renderMissionEmail } from './emailTemplate';
@@ -17,7 +18,8 @@ function timeToMinutes(time: string): number {
 }
 
 function minutesToTime(minutes: number): string {
-  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  const normalized = ((minutes % 1440) + 1440) % 1440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
 }
 
 function zonedParts(now: Date, timezone: string): { dateKey: string; minutes: number } {
@@ -37,36 +39,89 @@ function zonedParts(now: Date, timezone: string): { dateKey: string; minutes: nu
   };
 }
 
-/** Returns a local-time slot key when the recurring focus email is due. */
-export function getDueCheckInSlot(now: Date, settings: SchedulerSettings): string | null {
+function addDays(dateKey: string, amount: number): string {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+export interface DueCheckInSlot {
+  slotKey: string;
+  slotTime: string;
+  planDate: string;
+}
+
+/** Returns the locked-plan date and local-time slot when an hourly email is due. */
+export function getDueCheckInSlot(now: Date, settings: SchedulerSettings): DueCheckInSlot | null {
   if (!settings.checkInEnabled) return null;
   const current = zonedParts(now, settings.timezone);
   const start = timeToMinutes(settings.checkInStartTime);
   const end = timeToMinutes(settings.checkInEndTime);
   const interval = settings.checkInIntervalHours * 60;
-  if (current.minutes < start || current.minutes > end) return null;
+  let planDate = current.dateKey;
+  let elapsed: number;
+  let duration: number;
 
-  const slotMinutes = start + Math.floor((current.minutes - start) / interval) * interval;
-  if (slotMinutes > end || current.minutes - slotMinutes > 9) return null;
-
-  const slotKey = `${current.dateKey}T${minutesToTime(slotMinutes)}`;
-  if (settings.checkInLastSentAt) {
-    const last = zonedParts(new Date(settings.checkInLastSentAt), settings.timezone);
-    const lastKey = `${last.dateKey}T${minutesToTime(last.minutes)}`;
-    if (lastKey >= slotKey) return null;
+  if (start <= end) {
+    if (current.minutes < start || current.minutes > end) return null;
+    elapsed = current.minutes - start;
+    duration = end - start;
+  } else if (current.minutes >= start) {
+    elapsed = current.minutes - start;
+    duration = (1440 - start) + end;
+  } else if (current.minutes <= end) {
+    planDate = addDays(current.dateKey, -1);
+    elapsed = (1440 - start) + current.minutes;
+    duration = (1440 - start) + end;
+  } else {
+    return null;
   }
-  return slotKey;
+
+  const slotOffset = Math.floor(elapsed / interval) * interval;
+  if (slotOffset > duration || elapsed - slotOffset > 9) return null;
+  const absoluteSlotMinutes = start + slotOffset;
+  const slotDate = addDays(planDate, Math.floor(absoluteSlotMinutes / 1440));
+  const slotTime = minutesToTime(absoluteSlotMinutes);
+  return { slotKey: `${slotDate}T${slotTime}`, slotTime, planDate };
 }
 
 function taskForCheckIn(tasks: SchedulerTask[], now: Date): SchedulerTask | null {
   const planned = tasks.filter((task) => task.status === 'planned');
   return planned.find((task) => {
     const start = new Date(task.scheduledAt).getTime();
-    const end = task.endTime
-      ? new Date(`${task.taskDate}T${task.endTime}:00+05:30`).getTime()
+    const end = task.endAt
+      ? new Date(task.endAt).getTime()
       : start + 60 * 60_000;
     return now.getTime() >= start && now.getTime() < end;
   }) ?? planned.find((task) => new Date(task.scheduledAt).getTime() > now.getTime()) ?? null;
+}
+
+function taskTimeLabel(task: SchedulerTask, timezone: string): string {
+  if (!task.endTime) return formatTime12(task.startTime);
+  const crossesMidnight = task.endAt
+    ? zonedParts(new Date(task.endAt), timezone).dateKey !== task.taskDate
+    : false;
+  return `${formatTime12(task.startTime)} — ${formatTime12(task.endTime)}${crossesMidnight ? ' next day' : ''}`;
+}
+
+function planProgress(tasks: SchedulerTask[], timezone: string) {
+  const completed = tasks.filter((task) => task.status === 'completed').length;
+  const total = tasks.length;
+  return {
+    completed,
+    total,
+    percent: total ? Math.round((completed / total) * 100) : 0,
+    items: tasks.map((task) => ({
+      title: task.title,
+      timeLabel: taskTimeLabel(task, timezone),
+      status: task.status,
+      modeLabel: PERSONALITY_BY_ID[task.personalityId].shortName,
+    })),
+  };
+}
+
+function latestCompletionTime(tasks: SchedulerTask[]): number {
+  return Math.max(0, ...tasks.map((task) => task.completedAt ? new Date(task.completedAt).getTime() : 0));
 }
 
 export interface ReminderDispatchResult {
@@ -119,7 +174,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
 
   for (const task of tasks) {
     const personality = PERSONALITY_BY_ID[task.personalityId];
-    const timeLabel = `${formatTime12(task.startTime)}${task.endTime ? ` — ${formatTime12(task.endTime)}` : ''}`;
+    const timeLabel = taskTimeLabel(task, settings.timezone);
     const subject = `MISSION BRIEF // ${formatTime12(task.startTime)} // ${task.title.toUpperCase()}`;
     const directive = `${personality.identityStatement}\n\nYou put this objective on the schedule. Execute it. Do not renegotiate with avoidance.`;
     const html = renderMissionEmail({
@@ -155,51 +210,70 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
 
   const checkInSlot = getDueCheckInSlot(now, settings);
   if (checkInSlot) {
-    const dateKey = checkInSlot.slice(0, 10);
-    const slotTime = checkInSlot.slice(11);
-    const focusTask = taskForCheckIn(getTasksForDate(dateKey), now);
-    const personality = focusTask ? PERSONALITY_BY_ID[focusTask.personalityId] : null;
-    const objective = focusTask?.title ?? 'Define and finish the next concrete outcome.';
-    const isCurrent = focusTask ? new Date(focusTask.scheduledAt).getTime() <= now.getTime() : false;
-    const subject = `VIRA DIRECTIVE // RETURN TO OBJECTIVE // ${formatTime12(slotTime)}`;
-    const directive = focusTask && personality
-      ? `${isCurrent ? 'Current' : 'Next'} commitment identified. ${personality.identityStatement}\n\nFinish the measurable result. Motion without completion does not count.`
-      : 'No objective is filed. Open Daily Command, choose the one result that matters, and commit the next two hours to finishing it.';
-    const html = renderMissionEmail({
+    const plan = getDayPlan(checkInSlot.planDate);
+    const lastSent = plan.hourlyLastSentAt ? zonedParts(new Date(plan.hourlyLastSentAt), settings.timezone) : null;
+    const lastSlotKey = lastSent ? `${lastSent.dateKey}T${minutesToTime(lastSent.minutes)}` : null;
+    const planTasks = plan.locked ? getTasksForDate(checkInSlot.planDate) : [];
+    const progress = planProgress(planTasks, settings.timezone);
+    const allCompleted = progress.total > 0 && progress.completed === progress.total;
+    const finalProgressAlreadySent = allCompleted
+      && Boolean(plan.hourlyLastSentAt)
+      && new Date(plan.hourlyLastSentAt as string).getTime() >= latestCompletionTime(planTasks);
+
+    if (plan.locked && planTasks.length > 0 && (!lastSlotKey || lastSlotKey < checkInSlot.slotKey) && !finalProgressAlreadySent) {
+      const focusTask = taskForCheckIn(planTasks, now);
+      const personality = focusTask ? PERSONALITY_BY_ID[focusTask.personalityId] : null;
+      const objective = allCompleted
+        ? 'Locked plan complete. Every objective is closed.'
+        : focusTask?.title ?? 'Resolve the remaining locked objectives.';
+      const isCurrent = focusTask ? new Date(focusTask.scheduledAt).getTime() <= now.getTime() : false;
+      const subject = `[${progress.percent}%] VIRA HOURLY STATUS // ${progress.completed}/${progress.total} COMPLETE // ${formatTime12(checkInSlot.slotTime)}`;
+      const directive = allCompleted
+        ? 'Execution complete. The locked plan is at 100%. Record what worked, then recover deliberately.'
+        : focusTask && personality
+          ? `${isCurrent ? 'Current' : 'Next'} commitment identified. ${personality.identityStatement}\n\nComplete the stated result. Do not confuse activity with completion.`
+          : 'The plan remains locked and incomplete. Choose the earliest unfinished objective and close it now.';
+      const html = renderMissionEmail({
         kind: 'check-in',
-        eyebrow: 'Two-hour command review',
-        headline: 'Stop drifting. Return to the objective.',
+        eyebrow: 'Hourly locked-plan review',
+        headline: allCompleted ? 'Plan complete. Standard met.' : 'One hour passed. Report results.',
         objective,
         timeLabel: focusTask
-          ? `${formatTime12(focusTask.startTime)}${focusTask.endTime ? ` — ${formatTime12(focusTask.endTime)}` : ''}`
-          : `${formatTime12(slotTime)} checkpoint`,
+          ? taskTimeLabel(focusTask, settings.timezone)
+          : `${formatTime12(checkInSlot.slotTime)} checkpoint`,
         modeLabel: personality?.shortName ?? 'Builder',
         priorityLabel: focusTask ? `P${focusTask.priority}` : 'DIRECTIVE',
         directive,
         details: focusTask?.details || undefined,
+        progress,
         questions: [
-          'What did you actually finish in the last two hours?',
-          'What one measurable result will be finished in the next two?',
+          'What did you actually finish in the last hour?',
+          'What exact result will be completed in the next hour?',
           'Is your current action serving that result—or avoiding it?',
         ],
-        scheduleLabel: `Automatic checkpoint every ${settings.checkInIntervalHours} hours · ${formatTime12(settings.checkInStartTime)}–${formatTime12(settings.checkInEndTime)} · ${settings.timezone}`,
+        scheduleLabel: `Locked plan ${checkInSlot.planDate} · every ${settings.checkInIntervalHours} hour${settings.checkInIntervalHours === 1 ? '' : 's'} · ${formatTime12(settings.checkInStartTime)}–${formatTime12(settings.checkInEndTime)}${settings.checkInEndTime < settings.checkInStartTime ? ' next day' : ''} · ${settings.timezone}`,
       });
-    const response = await deliverEmail({
-      to: settings.reminderEmail,
-      subject,
-      html,
-      text: `VIRA TWO-HOUR DIRECTIVE\n\nOBJECTIVE: ${objective}\nCHECKPOINT: ${formatTime12(slotTime)}\nMODE: ${personality?.shortName ?? 'Builder'}\n\n${directive}\n\n1. What did you actually finish?\n2. What measurable result comes next?\n3. Are you executing or avoiding?`,
-      resend,
-      from,
-    });
+      const timeline = progress.items.map((item) => {
+        const mark = item.status === 'completed' ? '[DONE]' : item.status === 'skipped' ? '[SKIPPED]' : '[OPEN]';
+        return `${mark} ${item.timeLabel} · ${item.modeLabel} · ${item.title}`;
+      }).join('\n');
+      const response = await deliverEmail({
+        to: settings.reminderEmail,
+        subject,
+        html,
+        text: `VIRA HOURLY LOCKED-PLAN STATUS\n\nPROGRESS: ${progress.percent}% · ${progress.completed}/${progress.total} COMPLETE\n\n${timeline}\n\nCURRENT OBJECTIVE: ${objective}\nCHECKPOINT: ${formatTime12(checkInSlot.slotTime)}\nMODE: ${personality?.shortName ?? 'Builder'}\n\n${directive}\n\n1. What did you finish in the last hour?\n2. What exact result is next?\n3. Are you executing or avoiding?`,
+        resend,
+        from,
+      });
 
-    if (!response.sent) {
-      failed += 1;
-      console.error('[scheduler/check-in] Send failed', { slot: checkInSlot, message: response.error });
-    } else {
-      sent += 1;
-      focusCheckInsSent += 1;
-      markCheckInSent(now.toISOString());
+      if (!response.sent) {
+        failed += 1;
+        console.error('[scheduler/check-in] Send failed', { slot: checkInSlot.slotKey, message: response.error });
+      } else {
+        sent += 1;
+        focusCheckInsSent += 1;
+        markDayPlanHourlySent(checkInSlot.planDate, now.toISOString());
+      }
     }
   }
 

@@ -21,6 +21,7 @@
 | `/api/scheduler/tasks/[id]` | Dynamic | PATCH/DELETE: update status/details or delete a task |
 | `/api/scheduler/settings` | Dynamic | GET/PATCH: local reminder account and preferences |
 | `/api/scheduler/dispatch` | Dynamic | POST: protected due-email reminder dispatch |
+| `/api/scheduler/plan` | Dynamic | PATCH: lock/unlock one daily plan and arm hourly accountability |
 | `/api/google/connect` | Dynamic | Starts Google OAuth with CSRF state cookie |
 | `/api/google/callback` | Dynamic | Validates account, encrypts tokens, and creates VIRA task list |
 | `/api/google/status` | Dynamic | GET/PATCH/DELETE Google connection and sync preferences |
@@ -40,8 +41,10 @@
 - Task state: complete, skip, reset, and delete controls persist immediately
 - Reminders: browser notifications while the page is open and protected Resend email dispatch through `scheduler.js`
 - Time entry/display: explicit 12-hour hour, minute, and AM/PM controls; normalized 24-hour values remain in SQLite
-- Focus check-ins: duplicate-safe email every two hours inside a configurable daily window (default 8:00 AM–10:00 PM)
-- Email presentation: responsive dark mission-briefing layout with objective, timing, operating mode, priority, execution directive, and field questions
+- Locked-plan check-ins: duplicate-safe hourly email, gated by a per-day plan lock, with configurable windows that can cross midnight
+- Progress reporting: UI and email progress bars show completed/total objectives; hourly mail includes the entire timeline and stops after one final 100% report
+- Overnight scheduling: tasks can start or finish on the next calendar day while remaining part of the original operational plan
+- Email presentation: responsive dark mission-briefing layout with objective, timing, operating mode, priority, execution directive, progress, timeline, and field questions
 - Google Command Center: one-place connection controls and combined Calendar/Tasks agenda
 - Automatic Google mirroring: local create/status/update/delete operations propagate to Calendar and Google Tasks when connected
 - Gmail delivery: connected Gmail send-only OAuth is preferred, with Resend retained as a fallback
@@ -70,7 +73,7 @@
 - If `gym.xlsx` is open in Excel when saving from the UI, save will return a 423 error. User must close Excel first. This is by design (we detect the `~$gym.xlsx` lock file).
 - Finance and Career use mock data. Real Excel files need to be placed in `data/` and parsing logic added to `lib/financeData.ts` and `lib/careerData.ts`.
 - Browser reminders require the scheduler page to remain open. For always-on delivery, run `npm run scheduler` with `RESEND_API_KEY` and `SCHEDULER_SECRET`, or configure an external cron caller.
-- Google OAuth code is implemented, but the local `.env.local` still needs a Google Web OAuth client ID/secret before the user can complete consent.
+- Google OAuth is configured locally and the account connection is active; credentials and tokens remain in ignored local storage.
 
 ## Next Single Task
 - Enter the real recurring daily schedule, then add recurrence rules so repeated tasks do not need to be created manually.

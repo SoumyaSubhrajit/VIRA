@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 
-const baseUrl = process.env.VERA_BASE_URL || 'http://localhost:3000';
+const baseUrl = process.env.VERA_BASE_URL || 'http://localhost:3100';
 
 async function callEndpoint(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, options);
@@ -38,4 +38,4 @@ cron.schedule('30 6 * * *', async () => {
   }
 });
 
-console.log('VERA Scheduler running. Task and focus-email checks run every minute; gym reminder runs at 6:30 AM.');
+console.log('VERA Scheduler running. Task and hourly locked-plan email checks run every minute; gym reminder runs at 6:30 AM.');

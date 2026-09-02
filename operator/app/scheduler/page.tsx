@@ -28,6 +28,7 @@ function localDateKey(date = new Date()): string {
 }
 
 function addDays(dateKey: string, amount: number): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return '';
   const date = new Date(`${dateKey}T12:00:00`);
   date.setDate(date.getDate() + amount);
   return localDateKey(date);
@@ -40,6 +41,11 @@ function prettyDate(dateKey: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function shortDate(dateKey: string): string {
+  if (!dateKey) return 'next day';
+  return new Date(`${dateKey}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function scheduledIso(date: string, time: string): string {
@@ -104,8 +110,8 @@ function Time12Field({ label, value, onChange, wide = false }: { label: string; 
 function isTaskActive(task: SchedulerTask, now: Date): boolean {
   if (task.status !== 'planned') return false;
   const start = new Date(task.scheduledAt).getTime();
-  const end = task.endTime
-    ? new Date(`${task.taskDate}T${task.endTime}:00`).getTime()
+  const end = task.endAt
+    ? new Date(task.endAt).getTime()
     : start + 60 * 60_000;
   return now.getTime() >= start && now.getTime() < end;
 }
@@ -115,6 +121,8 @@ type TaskForm = {
   details: string;
   startTime: string;
   endTime: string;
+  startNextDay: boolean;
+  endNextDay: boolean;
   personalityId: PersonalityId;
   priority: 1 | 2 | 3;
   reminderMinutes: number;
@@ -126,6 +134,8 @@ const EMPTY_FORM: TaskForm = {
   details: '',
   startTime: '09:00',
   endTime: '10:00',
+  startNextDay: false,
+  endNextDay: false,
   personalityId: 'builder',
   priority: 2,
   reminderMinutes: 15,
@@ -149,6 +159,7 @@ export default function SchedulerPage() {
   const [googleAgenda, setGoogleAgenda] = useState<GoogleAgendaSnapshot | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [updatingPlan, setUpdatingPlan] = useState(false);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -224,6 +235,8 @@ export default function SchedulerPage() {
 
   const tasks = snapshot?.tasks ?? [];
   const personalities = snapshot?.personalities ?? [];
+  const completedTasks = tasks.filter((task) => task.status === 'completed').length;
+  const planProgress = tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
   const personalityMap = useMemo(
     () => Object.fromEntries(personalities.map((mode) => [mode.id, mode])) as Partial<Record<PersonalityId, PersonalityMode>>,
     [personalities]
@@ -250,10 +263,10 @@ export default function SchedulerPage() {
     }
   }, [now, personalityMap, snapshot?.settings.browserEnabled, tasks]);
 
-  const activeTask = now && selectedDate === localDateKey()
+  const activeTask = now
     ? tasks.find((task) => isTaskActive(task, now)) ?? null
     : null;
-  const nextTask = now && selectedDate === localDateKey()
+  const nextTask = now
     ? tasks.find((task) => task.status === 'planned' && new Date(task.scheduledAt).getTime() > now.getTime()) ?? null
     : tasks.find((task) => task.status === 'planned') ?? null;
   const focusTask = activeTask ?? nextTask;
@@ -269,10 +282,19 @@ export default function SchedulerPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
+          title: form.title,
+          details: form.details,
           taskDate: selectedDate,
+          startTime: form.startTime,
           endTime: form.endTime || null,
-          scheduledAt: scheduledIso(selectedDate, form.startTime),
+          scheduledAt: scheduledIso(addDays(selectedDate, form.startNextDay ? 1 : 0), form.startTime),
+          endAt: form.endTime
+            ? scheduledIso(addDays(selectedDate, form.endNextDay ? 1 : 0), form.endTime)
+            : null,
+          personalityId: form.personalityId,
+          priority: form.priority,
+          reminderMinutes: form.reminderMinutes,
+          reminderChannel: form.reminderChannel,
         }),
       });
       const body = await response.json();
@@ -280,7 +302,15 @@ export default function SchedulerPage() {
       const googleSync = body.googleSync as GoogleSyncResult | undefined;
       setForm((current) => {
         const startTime = current.endTime || current.startTime;
-        return { ...EMPTY_FORM, startTime, endTime: addMinutes24(startTime, 60) };
+        const endTime = addMinutes24(startTime, 60);
+        const startNextDay = current.endNextDay;
+        return {
+          ...EMPTY_FORM,
+          startTime,
+          endTime,
+          startNextDay,
+          endNextDay: startNextDay || endTime <= startTime,
+        };
       });
       const synced = googleSync?.calendar === 'synced' || googleSync?.tasks === 'synced';
       setSuccess(synced ? 'Task saved and synced with Google.' : 'Task saved to the scheduler database.');
@@ -347,6 +377,29 @@ export default function SchedulerPage() {
     await Promise.all([load(selectedDate), loadGoogle(selectedDate)]);
   }
 
+  async function setPlanLock(locked: boolean) {
+    setUpdatingPlan(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/scheduler/plan', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: selectedDate, locked }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to update plan lock.');
+      await load(selectedDate);
+      setSuccess(locked
+        ? 'Plan locked. Hourly progress emails are now armed for this schedule.'
+        : 'Plan unlocked. Hourly progress emails are paused for this schedule.');
+    } catch (planError) {
+      setError(planError instanceof Error ? planError.message : 'Failed to update plan lock.');
+    } finally {
+      setUpdatingPlan(false);
+    }
+  }
+
   async function saveSettings() {
     setSaving(true);
     setError('');
@@ -359,14 +412,14 @@ export default function SchedulerPage() {
           reminderEmail: email,
           emailEnabled: true,
           checkInEnabled,
-          checkInIntervalHours: 2,
+          checkInIntervalHours: 1,
           checkInStartTime,
           checkInEndTime,
         }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Failed to save reminder account.');
-      setSuccess(checkInEnabled ? 'Email saved. Two-hour focus check-ins are active.' : 'Reminder settings saved.');
+      setSuccess(checkInEnabled ? 'Email saved. Hourly locked-plan check-ins are active.' : 'Reminder settings saved.');
       await load(selectedDate);
     } catch (settingsError) {
       setError(settingsError instanceof Error ? settingsError.message : 'Failed to save reminder account.');
@@ -504,7 +557,37 @@ export default function SchedulerPage() {
         <div className={styles.workspace}>
           <div className={styles.column}>
             <section className={styles.panel}>
-              <h2 className={styles.panelTitle}>Timed agenda</h2>
+              <div className={styles.planHeader}>
+                <div>
+                  <h2 className={styles.panelTitle}>Timed agenda</h2>
+                  <div className={styles.planStatusText}>
+                    {snapshot?.dayPlan.locked ? 'Locked accountability plan' : 'Draft plan — lock it when ready'}
+                  </div>
+                </div>
+                <button
+                  className={snapshot?.dayPlan.locked ? styles.buttonDanger : styles.buttonPrimary}
+                  disabled={updatingPlan || (!snapshot?.dayPlan.locked && tasks.length === 0)}
+                  onClick={() => setPlanLock(!snapshot?.dayPlan.locked)}
+                >
+                  {updatingPlan ? 'Updating...' : snapshot?.dayPlan.locked ? 'Unlock plan' : 'Lock plan + hourly emails'}
+                </button>
+              </div>
+              {tasks.length > 0 && (
+                <div className={`${styles.planProgressCard} ${snapshot?.dayPlan.locked ? styles.planProgressLocked : ''}`}>
+                  <div className={styles.planProgressSummary}>
+                    <span>{completedTasks}/{tasks.length} objectives complete</span>
+                    <strong>{planProgress}%</strong>
+                  </div>
+                  <div className={styles.planProgressTrack}>
+                    <span style={{ width: `${planProgress}%` }} />
+                  </div>
+                  <div className={styles.planProgressNote}>
+                    {snapshot?.dayPlan.locked
+                      ? 'VIRA will include this progress and the full remaining timeline in every hourly email.'
+                      : 'Finish the schedule, then lock it to activate hourly accountability.'}
+                  </div>
+                </div>
+              )}
               {loading ? (
                 <div className={styles.empty}>Loading schedule...</div>
               ) : tasks.length === 0 ? (
@@ -513,20 +596,23 @@ export default function SchedulerPage() {
                 <div className={styles.agenda}>
                   {tasks.map((task) => {
                     const mode = personalityMap[task.personalityId];
-                    const current = !!now && isTaskActive(task, now) && selectedDate === localDateKey();
+                    const current = !!now && isTaskActive(task, now);
+                    const startsNextDay = localDateKey(new Date(task.scheduledAt)) !== task.taskDate;
+                    const endsNextDay = Boolean(task.endAt && localDateKey(new Date(task.endAt)) !== task.taskDate);
                     return (
                       <article
                         key={task.id}
                         className={`${styles.task} ${MODE_CLASS[task.personalityId]} ${current ? styles.taskCurrent : ''} ${task.status !== 'planned' ? styles.taskFinished : ''}`}
                       >
                         <div className={styles.taskTime}>
-                          {formatTime12(task.startTime)}
-                          {task.endTime && <span className={styles.taskEnd}>to {formatTime12(task.endTime)}</span>}
+                          {formatTime12(task.startTime)}{startsNextDay && <span className={styles.nextDayFlag}>+1 day</span>}
+                          {task.endTime && <span className={styles.taskEnd}>to {formatTime12(task.endTime)}{endsNextDay ? ' next day' : ''}</span>}
                         </div>
                         <div className={styles.taskMain}>
                           <h3 className={styles.taskTitle}>{task.title}</h3>
                           {task.details && <p className={styles.taskDetails}>{task.details}</p>}
                           <div className={styles.taskMeta}>
+                            {snapshot?.dayPlan.locked && <span className={styles.lockedBadge}>Locked</span>}
                             <span className={styles.badge}>{mode?.shortName ?? task.personalityId}</span>
                             <span className={styles.priorityBadge} data-priority={task.priority}>P{task.priority}</span>
                             <span className={styles.statusBadge} data-status={task.status}>{task.status}</span>
@@ -648,8 +734,41 @@ export default function SchedulerPage() {
                     />
                     <span className={styles.fieldHint}>Write enough detail that you can execute without deciding again later.</span>
                   </label>
-                  <Time12Field label="Start" value={form.startTime} wide onChange={(startTime) => setForm({ ...form, startTime })} />
-                  <Time12Field label="End" value={form.endTime} wide onChange={(endTime) => setForm({ ...form, endTime })} />
+                  <Time12Field label="Start" value={form.startTime} wide onChange={(startTime) => setForm((current) => ({
+                    ...current,
+                    startTime,
+                    endNextDay: current.endNextDay || (!current.startNextDay && current.endTime <= startTime),
+                  }))} />
+                  <Time12Field label="End" value={form.endTime} wide onChange={(endTime) => setForm((current) => ({
+                    ...current,
+                    endTime,
+                    endNextDay: current.startNextDay || endTime <= current.startTime,
+                  }))} />
+                  <div className={`${styles.fieldWide} ${styles.overnightControls}`}>
+                    <span className={styles.label}>Calendar day</span>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={form.startNextDay}
+                        onChange={(event) => setForm((current) => ({
+                          ...current,
+                          startNextDay: event.target.checked,
+                          endNextDay: event.target.checked || current.endNextDay,
+                        }))}
+                      />
+                      Start on {shortDate(addDays(selectedDate, 1))} (+1 day)
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={form.endNextDay}
+                        disabled={form.startNextDay}
+                        onChange={(event) => setForm((current) => ({ ...current, endNextDay: event.target.checked }))}
+                      />
+                      End on {shortDate(addDays(selectedDate, 1))} (+1 day)
+                    </label>
+                    <span className={styles.fieldHint}>Use these for a {shortDate(selectedDate)} plan that continues after midnight.</span>
+                  </div>
                   <label className={styles.fieldWide}>
                     <span className={styles.label}>Personality required</span>
                     <select className={styles.select} value={form.personalityId} onChange={(event) => setForm({ ...form, personalityId: event.target.value as PersonalityId })}>
@@ -698,8 +817,8 @@ export default function SchedulerPage() {
               <div className={styles.checkInCard}>
                 <label className={styles.toggleRow}>
                   <span>
-                    <strong>Two-hour focus email</strong>
-                    <small>Interrupt drift and reconnect you to the work.</small>
+                    <strong>Hourly locked-plan email</strong>
+                    <small>Every hour: progress bar, completed work, remaining timeline, and the next objective.</small>
                   </span>
                   <input type="checkbox" checked={checkInEnabled} onChange={(event) => setCheckInEnabled(event.target.checked)} />
                 </label>
@@ -708,7 +827,7 @@ export default function SchedulerPage() {
                   <Time12Field label="Last email" value={checkInEndTime} onChange={setCheckInEndTime} />
                 </div>
                 <div className={styles.checkInSummary}>
-                  Every 2 hours · {formatTime12(checkInStartTime)} to {formatTime12(checkInEndTime)} · daily
+                  Every 1 hour · {formatTime12(checkInStartTime)} to {formatTime12(checkInEndTime)}{checkInEndTime < checkInStartTime ? ' next day' : ''} · only when the selected plan is locked
                 </div>
               </div>
               <div className={styles.checkRow}>

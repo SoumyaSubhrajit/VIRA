@@ -6,6 +6,7 @@ import { PERSONALITY_MODES } from './personalities';
 import type {
   CreateTaskInput,
   PersonalityMode,
+  SchedulerDayPlan,
   SchedulerSettings,
   SchedulerSnapshot,
   SchedulerTask,
@@ -24,6 +25,7 @@ type TaskRow = {
   task_date: string;
   start_time: string;
   end_time: string | null;
+  end_at: string | null;
   scheduled_at: string;
   personality_id: SchedulerTask['personalityId'];
   status: SchedulerTask['status'];
@@ -59,6 +61,14 @@ type SettingsRow = {
   checkin_end_time: string;
   checkin_last_sent_at: string | null;
   created_at: string;
+  updated_at: string;
+};
+
+type DayPlanRow = {
+  user_id: string;
+  plan_date: string;
+  locked_at: string | null;
+  hourly_last_sent_at: string | null;
   updated_at: string;
 };
 
@@ -118,6 +128,7 @@ function initialize(db: Database.Database): void {
       task_date TEXT NOT NULL,
       start_time TEXT NOT NULL,
       end_time TEXT,
+      end_at TEXT,
       scheduled_at TEXT NOT NULL,
       personality_id TEXT NOT NULL REFERENCES personality_modes(id),
       status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'completed', 'skipped')),
@@ -134,6 +145,15 @@ function initialize(db: Database.Database): void {
       ON scheduler_tasks(user_id, task_date, start_time);
     CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_reminder
       ON scheduler_tasks(status, reminder_sent_at, scheduled_at);
+
+    CREATE TABLE IF NOT EXISTS scheduler_day_plans (
+      user_id TEXT NOT NULL,
+      plan_date TEXT NOT NULL,
+      locked_at TEXT,
+      hourly_last_sent_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, plan_date)
+    );
   `);
 
   // Incremental migration for databases created before recurring check-ins existed.
@@ -142,6 +162,7 @@ function initialize(db: Database.Database): void {
   ensureColumn(db, 'scheduler_settings', 'checkin_start_time', "TEXT NOT NULL DEFAULT '08:00'");
   ensureColumn(db, 'scheduler_settings', 'checkin_end_time', "TEXT NOT NULL DEFAULT '22:00'");
   ensureColumn(db, 'scheduler_settings', 'checkin_last_sent_at', 'TEXT');
+  ensureColumn(db, 'scheduler_tasks', 'end_at', 'TEXT');
 
   const upsertMode = db.prepare(`
     INSERT INTO personality_modes (
@@ -191,6 +212,7 @@ function mapTask(row: TaskRow): SchedulerTask {
     taskDate: row.task_date,
     startTime: row.start_time,
     endTime: row.end_time,
+    endAt: row.end_at,
     scheduledAt: row.scheduled_at,
     personalityId: row.personality_id,
     status: row.status,
@@ -299,10 +321,45 @@ export function getTasksForDate(date: string, userId = DEFAULT_USER_ID): Schedul
     .prepare(`
       SELECT * FROM scheduler_tasks
       WHERE user_id = ? AND task_date = ?
-      ORDER BY start_time ASC, priority ASC, created_at ASC
+      ORDER BY scheduled_at ASC, priority ASC, created_at ASC
     `)
     .all(userId, date) as TaskRow[];
   return rows.map(mapTask);
+}
+
+export function getDayPlan(planDate: string, userId = DEFAULT_USER_ID): SchedulerDayPlan {
+  const row = getSchedulerDb()
+    .prepare('SELECT * FROM scheduler_day_plans WHERE user_id = ? AND plan_date = ?')
+    .get(userId, planDate) as DayPlanRow | undefined;
+  return {
+    userId,
+    planDate,
+    locked: Boolean(row?.locked_at),
+    lockedAt: row?.locked_at ?? null,
+    hourlyLastSentAt: row?.hourly_last_sent_at ?? null,
+    updatedAt: row?.updated_at ?? new Date().toISOString(),
+  };
+}
+
+export function setDayPlanLocked(planDate: string, locked: boolean, userId = DEFAULT_USER_ID): SchedulerDayPlan {
+  const now = new Date().toISOString();
+  getSchedulerDb().prepare(`
+    INSERT INTO scheduler_day_plans (user_id, plan_date, locked_at, hourly_last_sent_at, updated_at)
+    VALUES (?, ?, ?, NULL, ?)
+    ON CONFLICT(user_id, plan_date) DO UPDATE SET
+      locked_at = excluded.locked_at,
+      hourly_last_sent_at = NULL,
+      updated_at = excluded.updated_at
+  `).run(userId, planDate, locked ? now : null, now);
+  return getDayPlan(planDate, userId);
+}
+
+export function markDayPlanHourlySent(planDate: string, sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): void {
+  getSchedulerDb().prepare(`
+    UPDATE scheduler_day_plans
+    SET hourly_last_sent_at = ?, updated_at = ?
+    WHERE user_id = ? AND plan_date = ? AND locked_at IS NOT NULL
+  `).run(sentAt, sentAt, userId, planDate);
 }
 
 export function getTask(id: string, userId = DEFAULT_USER_ID): SchedulerTask | null {
@@ -318,11 +375,11 @@ export function createTask(input: CreateTaskInput, userId = DEFAULT_USER_ID): Sc
   getSchedulerDb()
     .prepare(`
       INSERT INTO scheduler_tasks (
-        id, user_id, title, details, task_date, start_time, end_time, scheduled_at,
+        id, user_id, title, details, task_date, start_time, end_time, end_at, scheduled_at,
         personality_id, status, priority, reminder_minutes, reminder_channel,
         reminder_sent_at, created_at, updated_at, completed_at
       ) VALUES (
-        @id, @userId, @title, @details, @taskDate, @startTime, @endTime, @scheduledAt,
+        @id, @userId, @title, @details, @taskDate, @startTime, @endTime, @endAt, @scheduledAt,
         @personalityId, 'planned', @priority, @reminderMinutes, @reminderChannel,
         NULL, @createdAt, @updatedAt, NULL
       )
@@ -335,6 +392,7 @@ export function createTask(input: CreateTaskInput, userId = DEFAULT_USER_ID): Sc
       taskDate: input.taskDate,
       startTime: input.startTime,
       endTime: input.endTime ?? null,
+      endAt: input.endAt ?? null,
       scheduledAt: input.scheduledAt,
       personalityId: input.personalityId,
       priority: input.priority ?? 2,
@@ -355,6 +413,7 @@ export function updateTask(id: string, input: UpdateTaskInput, userId = DEFAULT_
     taskDate: 'task_date',
     startTime: 'start_time',
     endTime: 'end_time',
+    endAt: 'end_at',
     scheduledAt: 'scheduled_at',
     personalityId: 'personality_id',
     status: 'status',
@@ -377,7 +436,7 @@ export function updateTask(id: string, input: UpdateTaskInput, userId = DEFAULT_
     assignments.push('completed_at = NULL');
   }
 
-  const reminderFields = ['title', 'taskDate', 'startTime', 'scheduledAt', 'personalityId', 'reminderMinutes', 'reminderChannel'];
+  const reminderFields = ['title', 'taskDate', 'startTime', 'endTime', 'endAt', 'scheduledAt', 'personalityId', 'reminderMinutes', 'reminderChannel'];
   if (reminderFields.some((field) => field in input) || input.status === 'planned') {
     assignments.push('reminder_sent_at = NULL');
   }
@@ -435,6 +494,7 @@ export function getSchedulerSnapshot(date: string, userId = DEFAULT_USER_ID): Sc
     tasks: getTasksForDate(date, userId),
     personalities: getPersonalities(),
     settings: getSchedulerSettings(userId),
+    dayPlan: getDayPlan(date, userId),
     serverTime: new Date().toISOString(),
   };
 }

@@ -70,6 +70,14 @@ function validateScheduledAt(value: unknown): string {
   return parsed.toISOString();
 }
 
+function validateEndAt(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new SchedulerValidationError('endAt must be an ISO timestamp.');
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new SchedulerValidationError('endAt must be a valid ISO timestamp.');
+  return parsed.toISOString();
+}
+
 function validatePersonality(value: unknown): PersonalityId {
   if (typeof value !== 'string' || !PERSONALITIES.has(value as PersonalityId)) {
     throw new SchedulerValidationError('personalityId must be home, builder, or free.');
@@ -108,17 +116,22 @@ export function validateCreateTask(body: unknown): CreateTaskInput {
   const input = body as Record<string, unknown>;
   const startTime = validateTime(input.startTime, 'startTime') as string;
   const endTime = validateTime(input.endTime, 'endTime', true);
-  if (endTime && endTime <= startTime) {
-    throw new SchedulerValidationError('endTime must be later than startTime.');
+  const taskDate = validateDate(input.taskDate);
+  const scheduledAt = validateScheduledAt(input.scheduledAt);
+  const endAt = validateEndAt(input.endAt)
+    ?? (endTime ? new Date(`${taskDate}T${endTime}:00+05:30`).toISOString() : null);
+  if (endAt && new Date(endAt).getTime() <= new Date(scheduledAt).getTime()) {
+    throw new SchedulerValidationError('Task end must be later than its start. Select “next day” for an overnight task.');
   }
 
   return {
     title: requiredString(input.title, 'title', 140),
     details: optionalString(input.details, 'details', 2000),
-    taskDate: validateDate(input.taskDate),
+    taskDate,
     startTime,
     endTime,
-    scheduledAt: validateScheduledAt(input.scheduledAt),
+    endAt,
+    scheduledAt,
     personalityId: validatePersonality(input.personalityId),
     priority: validatePriority(input.priority),
     reminderMinutes: validateReminderMinutes(input.reminderMinutes),
@@ -138,6 +151,7 @@ export function validateUpdateTask(body: unknown): UpdateTaskInput {
   if ('taskDate' in input) update.taskDate = validateDate(input.taskDate);
   if ('startTime' in input) update.startTime = validateTime(input.startTime, 'startTime') as string;
   if ('endTime' in input) update.endTime = validateTime(input.endTime, 'endTime', true);
+  if ('endAt' in input) update.endAt = validateEndAt(input.endAt);
   if ('scheduledAt' in input) update.scheduledAt = validateScheduledAt(input.scheduledAt);
   if ('personalityId' in input) update.personalityId = validatePersonality(input.personalityId);
   if ('priority' in input) update.priority = validatePriority(input.priority);
@@ -150,8 +164,8 @@ export function validateUpdateTask(body: unknown): UpdateTaskInput {
     update.status = input.status as TaskStatus;
   }
 
-  if (update.startTime && update.endTime && update.endTime <= update.startTime) {
-    throw new SchedulerValidationError('endTime must be later than startTime.');
+  if (update.scheduledAt && update.endAt && new Date(update.endAt).getTime() <= new Date(update.scheduledAt).getTime()) {
+    throw new SchedulerValidationError('Task end must be later than its start.');
   }
   if (Object.keys(update).length === 0) {
     throw new SchedulerValidationError('At least one task field must be provided.');

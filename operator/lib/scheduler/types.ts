@@ -20,6 +20,7 @@ export interface SchedulerTask {
   taskDate: string;
   startTime: string;
   endTime: string | null;
+  endAt: string | null;
   scheduledAt: string;
   personalityId: PersonalityId;
   status: TaskStatus;
@@ -53,7 +54,17 @@ export interface SchedulerSnapshot {
   tasks: SchedulerTask[];
   personalities: PersonalityMode[];
   settings: SchedulerSettings;
+  dayPlan: SchedulerDayPlan;
   serverTime: string;
+}
+
+export interface SchedulerDayPlan {
+  userId: string;
+  planDate: string;
+  locked: boolean;
+  lockedAt: string | null;
+  hourlyLastSentAt: string | null;
+  updatedAt: string;
 }
 
 export interface CreateTaskInput {
@@ -62,6 +73,7 @@ export interface CreateTaskInput {
   taskDate: string;
   startTime: string;
   endTime?: string | null;
+  endAt?: string | null;
   scheduledAt: string;
   personalityId: PersonalityId;
   priority?: 1 | 2 | 3;
