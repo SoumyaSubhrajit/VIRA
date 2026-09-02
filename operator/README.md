@@ -26,11 +26,11 @@ It reads local Excel files (`gym.xlsx`, `finance.xlsx`, `career.xlsx`) and displ
    ```bash
    npm run dev
    ```
-   Open [http://localhost:3000](http://localhost:3000)
+   Open [http://localhost:3100](http://localhost:3100)
 
 ## Daily Command scheduler
 
-Open [http://localhost:3000/scheduler](http://localhost:3000/scheduler) to create timed tasks and choose the identity to use for each one:
+Open [http://localhost:3100/scheduler](http://localhost:3100/scheduler) to create timed tasks and choose the identity to use for each one:
 
 - **Home Self** — warmth and presence for family and close relationships.
 - **Builder** — focused execution for career, goals, and achievement.
@@ -49,9 +49,9 @@ SCHEDULER_SECRET=a_long_random_secret
 npm run scheduler
 ```
 
-Task times use explicit 12-hour hour/minute/AM-PM controls while the database stores normalized 24-hour values. The reminder panel also supports a daily two-hour focus email, enabled by default from 8:00 AM through 10:00 PM; both boundaries are adjustable.
+Task times use explicit 12-hour hour/minute/AM-PM controls while the database stores normalized timestamps. A task can start or end on the next calendar day, so one operational plan can run past midnight.
 
-Task reminders and focus check-ins use the same responsive mission-briefing email template: objective, time window, operating mode, priority, command directive, and review questions are presented directly inside the email.
+Finish entering a day's tasks, then select **Lock plan + hourly emails**. While that day is locked, VIRA sends a duplicate-safe email every hour inside the configured window. The window may cross midnight (for example, 3:00 AM through 2:00 AM the following day). Every email includes a completion percentage, visual progress bar, complete task timeline, remaining work, current/next objective, operating mode, and review questions. Once every task is complete, one final 100% email is sent and further hourly messages stop.
 
 The reminder email address and focus window are configured from the scheduler page and saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
 

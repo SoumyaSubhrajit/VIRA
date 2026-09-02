@@ -12,6 +12,17 @@ export interface MissionEmailInput {
   priorityLabel?: string;
   questions?: string[];
   scheduleLabel?: string;
+  progress?: {
+    completed: number;
+    total: number;
+    percent: number;
+    items: Array<{
+      title: string;
+      timeLabel: string;
+      status: 'planned' | 'completed' | 'skipped';
+      modeLabel: string;
+    }>;
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -57,6 +68,44 @@ export function renderMissionEmail(input: MissionEmailInput): string {
         </td>
       </tr>
     `
+    : '';
+  const progress = input.progress
+    ? (() => {
+      const percent = Math.max(0, Math.min(100, Math.round(input.progress.percent)));
+      return `
+        <tr>
+          <td class="pad" style="padding:0 32px 24px">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#0b0e0b;border:1px solid #2e3728">
+              <tr>
+                <td style="padding:18px 20px 6px;font:700 10px Arial,sans-serif;letter-spacing:2px;color:#a7c957">LOCKED PLAN PROGRESS</td>
+                <td align="right" style="padding:18px 20px 6px;font:800 18px Arial,sans-serif;color:#d8ff3e">${percent}%</td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding:5px 20px 8px">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#242b20">
+                    <tr><td width="${percent}%" style="height:10px;background:#d8ff3e;font-size:0;line-height:0">&nbsp;</td><td style="height:10px;font-size:0;line-height:0">&nbsp;</td></tr>
+                  </table>
+                </td>
+              </tr>
+              <tr><td colspan="2" style="padding:0 20px 15px;font:12px Arial,sans-serif;color:#89927e">${input.progress.completed} of ${input.progress.total} objectives completed</td></tr>
+              ${input.progress.items.map((item) => `
+                <tr>
+                  <td colspan="2" style="padding:11px 20px;border-top:1px solid #242b20">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+                      <tr>
+                        <td width="28" style="font:800 15px Arial,sans-serif;color:${item.status === 'completed' ? '#d8ff3e' : item.status === 'skipped' ? '#d66b5d' : '#89927e'}">${item.status === 'completed' ? '✓' : item.status === 'skipped' ? '×' : '○'}</td>
+                        <td style="font:700 13px/1.45 Arial,sans-serif;color:${item.status === 'completed' ? '#89927e' : '#eef1e8'};${item.status === 'completed' ? 'text-decoration:line-through;' : ''}">${escapeHtml(item.title)}</td>
+                        <td align="right" style="font:700 10px Arial,sans-serif;color:#89927e">${escapeHtml(item.timeLabel)} · ${escapeHtml(item.modeLabel)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              `).join('')}
+            </table>
+          </td>
+        </tr>
+      `;
+    })()
     : '';
 
   return `<!doctype html>
@@ -105,6 +154,7 @@ export function renderMissionEmail(input: MissionEmailInput): string {
                 </table>
               </td>
             </tr>
+            ${progress}
             <tr>
               <td class="pad" style="padding:0 32px 22px">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">

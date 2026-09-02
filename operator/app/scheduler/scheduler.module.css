@@ -186,6 +186,7 @@
 
 .button:disabled,
 .buttonPrimary:disabled,
+.buttonDanger:disabled,
 .statusButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -229,6 +230,67 @@
 }
 
 .panelHeader .panelTitle { margin-bottom: 14px; }
+
+.planHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.planHeader .panelTitle { margin-bottom: 4px; }
+
+.planStatusText,
+.planProgressNote {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.planProgressCard {
+  margin-bottom: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 5px;
+  background: var(--bg-inset);
+}
+
+.planProgressLocked { border-left-color: var(--lime); }
+
+.planProgressSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.planProgressSummary strong { font-size: 16px; color: var(--lime); }
+
+.planProgressTrack {
+  height: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+  background: var(--border-default);
+  border-radius: 999px;
+}
+
+.planProgressTrack span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--lime);
+  transition: width 220ms ease;
+}
 
 .connectionBadge {
   display: inline-flex;
@@ -291,6 +353,18 @@
   color: var(--text-dim);
 }
 
+.nextDayFlag {
+  display: inline-flex;
+  margin-left: 5px;
+  padding: 1px 4px;
+  border: 1px solid var(--blue);
+  border-radius: 999px;
+  font: 700 7px var(--font-display);
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
 .taskTitle {
   margin: 0;
   font-family: var(--font-mono);
@@ -311,7 +385,8 @@
 
 .badge,
 .priorityBadge,
-.statusBadge {
+.statusBadge,
+.lockedBadge {
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
@@ -329,6 +404,8 @@
   border-color: var(--mode);
   color: var(--mode);
 }
+
+.lockedBadge { border-color: var(--lime); color: var(--lime); }
 
 .priorityBadge[data-priority='1'] { color: var(--danger); border-color: var(--danger); }
 .statusBadge[data-status='completed'] { color: var(--lime); border-color: var(--lime); }
@@ -437,6 +514,26 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--bg-inset) 72%, transparent);
 }
+
+.overnightControls {
+  padding: 11px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+  background: var(--bg-inset);
+}
+
+.overnightControls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.overnightControls input { width: 16px; height: 16px; accent-color: var(--lime); }
+.overnightControls input:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .input,
 .select,
@@ -751,4 +848,5 @@
   .task { grid-template-columns: 70px minmax(0, 1fr); }
   .taskActions { grid-column: 2; }
   .settingRow { align-items: stretch; flex-direction: column; }
+  .planHeader { align-items: stretch; flex-direction: column; }
 }

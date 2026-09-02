@@ -67,12 +67,6 @@ export async function PATCH(request: NextRequest) {
     if ('checkInStartTime' in body) update.checkInStartTime = validateTime(body.checkInStartTime, 'checkInStartTime');
     if ('checkInEndTime' in body) update.checkInEndTime = validateTime(body.checkInEndTime, 'checkInEndTime');
 
-    const current = getSchedulerSettings();
-    const startTime = update.checkInStartTime ?? current.checkInStartTime;
-    const endTime = update.checkInEndTime ?? current.checkInEndTime;
-    if (endTime <= startTime) {
-      throw new SchedulerValidationError('The check-in end time must be later than the start time.');
-    }
     if (Object.keys(update).length === 0) {
       throw new SchedulerValidationError('At least one settings field must be provided.');
     }
