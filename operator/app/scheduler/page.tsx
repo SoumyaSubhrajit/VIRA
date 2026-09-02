@@ -129,6 +129,11 @@ type TaskForm = {
   reminderChannel: ReminderChannel;
 };
 
+type SettingsFeedback = {
+  kind: 'success' | 'error';
+  message: string;
+};
+
 const EMPTY_FORM: TaskForm = {
   title: '',
   details: '',
@@ -160,6 +165,9 @@ export default function SchedulerPage() {
   const [googleBusy, setGoogleBusy] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [updatingPlan, setUpdatingPlan] = useState(false);
+  const [browserBusy, setBrowserBusy] = useState(false);
+  const [browserPermission, setBrowserPermission] = useState<'default' | 'denied' | 'granted' | 'unsupported'>('default');
+  const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -231,6 +239,11 @@ export default function SchedulerPage() {
     if (raw) {
       try { notifiedRef.current = new Set(JSON.parse(raw) as string[]); } catch { notifiedRef.current = new Set(); }
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof Notification === 'undefined') setBrowserPermission('unsupported');
+    else setBrowserPermission(Notification.permission);
   }, []);
 
   const tasks = snapshot?.tasks ?? [];
@@ -404,6 +417,7 @@ export default function SchedulerPage() {
     setSaving(true);
     setError('');
     setSuccess('');
+    setSettingsFeedback({ kind: 'success', message: 'Saving email schedule...' });
     try {
       const response = await fetch('/api/scheduler/settings', {
         method: 'PATCH',
@@ -421,30 +435,66 @@ export default function SchedulerPage() {
       if (!response.ok) throw new Error(body.error ?? 'Failed to save reminder account.');
       setSuccess(checkInEnabled ? 'Email saved. Hourly locked-plan check-ins are active.' : 'Reminder settings saved.');
       await load(selectedDate);
+      setSettingsFeedback({
+        kind: 'success',
+        message: checkInEnabled
+          ? `Saved. Hourly emails: ${formatTime12(checkInStartTime)} to ${formatTime12(checkInEndTime)}${checkInEndTime < checkInStartTime ? ' next day' : ''}.`
+          : 'Saved. Hourly locked-plan emails are paused.',
+      });
     } catch (settingsError) {
-      setError(settingsError instanceof Error ? settingsError.message : 'Failed to save reminder account.');
+      const message = settingsError instanceof Error ? settingsError.message : 'Failed to save reminder account.';
+      setError(message);
+      setSettingsFeedback({ kind: 'error', message });
     } finally {
       setSaving(false);
     }
   }
 
   async function enableBrowserReminders() {
+    setBrowserBusy(true);
+    setSettingsFeedback(null);
     if (typeof Notification === 'undefined') {
-      setError('This browser does not support desktop notifications.');
+      const message = 'This browser does not support desktop notifications. Email reminders are still active.';
+      setBrowserPermission('unsupported');
+      setError(message);
+      setSettingsFeedback({ kind: 'error', message });
+      setBrowserBusy(false);
       return;
     }
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      setError('Browser notifications were not enabled. You can change this in browser site settings.');
-      return;
+    try {
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      setBrowserPermission(permission);
+      if (permission !== 'granted') {
+        const message = permission === 'denied'
+          ? 'Browser notifications are blocked. Allow notifications for 127.0.0.1 in the browser site settings, then try again.'
+          : 'Notification permission was not granted. Email reminders remain active.';
+        setError(message);
+        setSettingsFeedback({ kind: 'error', message });
+        return;
+      }
+      const response = await fetch('/api/scheduler/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ browserEnabled: true }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to save browser reminder setting.');
+      new Notification('VIRA reminders are active', {
+        body: 'Test successful. Locked-plan reminders will appear in this browser.',
+        tag: 'vira-browser-test',
+      });
+      setSuccess('Browser reminders enabled and test notification sent.');
+      setSettingsFeedback({ kind: 'success', message: 'Browser reminders enabled. A test notification was sent just now.' });
+      await load(selectedDate);
+    } catch (notificationError) {
+      const message = notificationError instanceof Error ? notificationError.message : 'Browser notification test failed.';
+      setError(message);
+      setSettingsFeedback({ kind: 'error', message });
+    } finally {
+      setBrowserBusy(false);
     }
-    await fetch('/api/scheduler/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ browserEnabled: true }),
-    });
-    setSuccess('Browser reminders enabled for this device.');
-    await load(selectedDate);
   }
 
   async function updateGooglePreference(
@@ -834,9 +884,34 @@ export default function SchedulerPage() {
                 <span>Timezone: {snapshot?.settings.timezone ?? 'Asia/Kolkata'}</span>
               </div>
               <div className={styles.formActions}>
-                <button className={styles.buttonPrimary} disabled={saving || !email.trim()} onClick={saveSettings}>{saving ? 'Saving...' : 'Save email schedule'}</button>
-                <button className={styles.button} onClick={enableBrowserReminders}>Enable browser reminders</button>
+                <button type="button" className={styles.buttonPrimary} disabled={saving || !email.trim()} onClick={saveSettings}>{saving ? 'Saving...' : 'Save email schedule'}</button>
+                <button
+                  type="button"
+                  className={browserPermission === 'granted' ? styles.buttonPrimary : styles.button}
+                  disabled={browserBusy || browserPermission === 'unsupported'}
+                  onClick={enableBrowserReminders}
+                >
+                  {browserBusy
+                    ? 'Testing...'
+                    : browserPermission === 'granted'
+                      ? 'Send test browser reminder'
+                      : browserPermission === 'denied'
+                        ? 'Retry browser permission'
+                        : browserPermission === 'unsupported'
+                          ? 'Browser reminders unsupported'
+                          : 'Enable browser reminders'}
+                </button>
               </div>
+              {settingsFeedback && (
+                <div
+                  className={settingsFeedback.kind === 'success' ? styles.settingsFeedbackSuccess : styles.settingsFeedbackError}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <strong>{settingsFeedback.kind === 'success' ? 'Confirmed' : 'Action required'}</strong>
+                  <span>{settingsFeedback.message}</span>
+                </div>
+              )}
             </section>
 
             <section className={styles.panel}>

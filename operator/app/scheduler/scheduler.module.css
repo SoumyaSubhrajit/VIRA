@@ -662,6 +662,41 @@
   color: var(--lime);
 }
 
+.settingsFeedbackSuccess,
+.settingsFeedbackError {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: 4px;
+  font: 11px/1.5 var(--font-mono);
+}
+
+.settingsFeedbackSuccess {
+  border-color: var(--lime);
+  background: var(--lime-dim);
+  color: var(--lime);
+}
+
+.settingsFeedbackError {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.settingsFeedbackSuccess strong,
+.settingsFeedbackError strong {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.settingsFeedbackSuccess span,
+.settingsFeedbackError span { color: var(--text-primary); }
+
 .googleSetup,
 .googleConnected {
   font-family: var(--font-mono);
