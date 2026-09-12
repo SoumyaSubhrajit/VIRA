@@ -2,50 +2,86 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { MemoryEntry, GuideObservation } from './types';
+import { createDatabase, type AsyncDatabase } from './database';
 
 const MEMORY_FILE = path.join(process.cwd(), 'data', 'agent_memory.json');
+const DATABASE_FILE = path.join(process.cwd(), 'data', 'vira-scheduler.sqlite');
 const MAX_ENTRIES = 100;
 
-function generateId(): string {
-  return crypto.randomUUID();
+let databasePromise: Promise<AsyncDatabase> | null = null;
+
+async function database(): Promise<AsyncDatabase> {
+  if (databasePromise) return databasePromise;
+  databasePromise = (async () => {
+    const db = createDatabase(DATABASE_FILE);
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_memory (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        observation TEXT NOT NULL,
+        suggested_action TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'info',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_memory_user_created
+        ON agent_memory(user_id, created_at DESC);
+    `);
+
+    const count = await db.prepare('SELECT COUNT(*) AS count FROM agent_memory').get() as { count: number };
+    if (Number(count.count) === 0 && fs.existsSync(MEMORY_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8')) as MemoryEntry[] | Record<string, MemoryEntry[]>;
+        const grouped = Array.isArray(parsed) ? { 'default-user': parsed } : parsed;
+        await db.transaction(async (transaction) => {
+          for (const [userId, entries] of Object.entries(grouped)) {
+            for (const entry of entries.slice(0, MAX_ENTRIES)) {
+              await transaction.prepare(`
+                INSERT OR IGNORE INTO agent_memory(id,user_id,observation,suggested_action,severity,created_at)
+                VALUES(?,?,?,?,?,?)
+              `).run(entry.id || crypto.randomUUID(), userId, entry.observation, entry.suggested_action, entry.severity, entry.timestamp);
+            }
+          }
+        })();
+      } catch (error) {
+        console.warn('[memory] Existing JSON memory could not be imported:', error);
+      }
+    }
+    return db;
+  })();
+  return databasePromise;
 }
 
-export function getMemory(_userId: string): MemoryEntry[] {
-  try {
-    if (!fs.existsSync(MEMORY_FILE)) return [];
-    const raw = fs.readFileSync(MEMORY_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    // Support both { "default-user": [...] } and flat array formats
-    if (Array.isArray(parsed)) return parsed;
-    return parsed[_userId] ?? [];
-  } catch {
-    return [];
-  }
+export async function getMemory(userId: string): Promise<MemoryEntry[]> {
+  const rows = await (await database()).prepare(`
+    SELECT id,observation,suggested_action,severity,created_at
+    FROM agent_memory WHERE user_id=? ORDER BY created_at DESC LIMIT ?
+  `).all(userId, MAX_ENTRIES) as Array<{ id: string; observation: string; suggested_action: string; severity: MemoryEntry['severity']; created_at: string }>;
+  return rows.map((row) => ({
+    id: row.id,
+    observation: row.observation,
+    suggested_action: row.suggested_action,
+    severity: row.severity,
+    timestamp: row.created_at,
+  }));
 }
 
-export function saveMemory(_userId: string, observation: GuideObservation): MemoryEntry {
-  const entries = getMemory(_userId);
-  const newEntry: MemoryEntry = {
+export async function saveMemory(userId: string, observation: GuideObservation): Promise<MemoryEntry> {
+  const entry: MemoryEntry = {
     ...observation,
     timestamp: new Date().toISOString(),
-    id: generateId(),
+    id: crypto.randomUUID(),
   };
-  entries.unshift(newEntry); // newest first
-  const trimmed = entries.slice(0, MAX_ENTRIES);
-
-  const existing = (() => {
-    try {
-      if (!fs.existsSync(MEMORY_FILE)) return {};
-      const raw = fs.readFileSync(MEMORY_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? {} : parsed;
-    } catch {
-      return {};
-    }
+  const db = await database();
+  await db.transaction(async (transaction) => {
+    await transaction.prepare(`
+      INSERT INTO agent_memory(id,user_id,observation,suggested_action,severity,created_at)
+      VALUES(?,?,?,?,?,?)
+    `).run(entry.id, userId, entry.observation, entry.suggested_action, entry.severity, entry.timestamp);
+    await transaction.prepare(`
+      DELETE FROM agent_memory WHERE user_id=? AND id NOT IN (
+        SELECT id FROM agent_memory WHERE user_id=? ORDER BY created_at DESC LIMIT ?
+      )
+    `).run(userId, userId, MAX_ENTRIES);
   })();
-
-  existing[_userId] = trimmed;
-  fs.mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(existing, null, 2), 'utf-8');
-  return newEntry;
+  return entry;
 }

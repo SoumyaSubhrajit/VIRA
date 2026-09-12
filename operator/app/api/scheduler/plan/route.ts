@@ -19,14 +19,14 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'locked must be true or false.' }, { status: 400 });
     }
 
-    const tasks = getTasksForDate(body.date);
+    const tasks = await getTasksForDate(body.date);
     if (body.locked && tasks.length === 0) {
       return NextResponse.json({ error: 'Add at least one task before locking the plan.' }, { status: 400 });
     }
 
-    const plan = setDayPlanLocked(body.date, body.locked);
+    const plan = await setDayPlanLocked(body.date, body.locked);
     if (body.locked) {
-      updateSchedulerSettings({ checkInEnabled: true, checkInIntervalHours: 1 });
+      await updateSchedulerSettings({ checkInEnabled: true, checkInIntervalHours: 1 });
     }
     const completed = tasks.filter((task) => task.status === 'completed').length;
     return NextResponse.json({

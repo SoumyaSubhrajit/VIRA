@@ -41,9 +41,9 @@ export async function POST() {
       },
     };
 
-    const memoryHistory = getMemory(userId);
+    const memoryHistory = await getMemory(userId);
     const observation = await getGuideObservation(dataSummary, memoryHistory);
-    const saved = saveMemory(userId, observation);
+    const saved = await saveMemory(userId, observation);
 
     return NextResponse.json(saved);
   } catch (err) {
@@ -57,7 +57,7 @@ export async function POST() {
 
 export async function GET() {
   try {
-    const memory = getMemory('default-user');
+    const memory = await getMemory('default-user');
     return NextResponse.json(memory);
   } catch (err) {
     return NextResponse.json([], { status: 200 });

@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     }
     if (!taskList.id) throw new Error('Google Tasks did not return a task-list ID.');
 
-    saveGoogleConnection({
+    await saveGoogleConnection({
       email,
       encryptedTokens: encryptGoogleTokens(tokens),
       scopes: tokens.scope?.split(' ') ?? [...GOOGLE_SCOPES],
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
       tasksSyncEnabled: true,
       gmailSendEnabled: true,
     });
-    updateSchedulerSettings({ reminderEmail: email, emailEnabled: true });
+    await updateSchedulerSettings({ reminderEmail: email, emailEnabled: true });
 
     const response = NextResponse.redirect(schedulerRedirect({ google: 'connected' }));
     response.cookies.delete('vira_google_oauth_state');

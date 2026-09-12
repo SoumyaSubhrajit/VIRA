@@ -27,7 +27,7 @@ export async function sendWithConnectedGmail(input: {
   text: string;
 }): Promise<GmailDeliveryResult> {
   try {
-    const authorized = getAuthorizedGoogleClient();
+    const authorized = await getAuthorizedGoogleClient();
     if (!authorized || !authorized.connection.gmailSendEnabled) {
       return { attempted: false, sent: false };
     }

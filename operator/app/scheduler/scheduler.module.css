@@ -798,6 +798,36 @@
   margin-top: 14px;
 }
 
+.notionArchitecture {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+
+.notionArchitecture > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-top: 2px solid var(--blue);
+  border-radius: 4px;
+  background: var(--bg-inset);
+}
+
+.notionArchitecture strong {
+  font: 700 10px var(--font-display);
+  letter-spacing: 0.8px;
+  color: var(--text-primary);
+}
+
+.notionArchitecture small {
+  font: 9px/1.45 var(--font-mono);
+  color: var(--text-dim);
+}
+
 .googleAgendaGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -884,4 +914,5 @@
   .taskActions { grid-column: 2; }
   .settingRow { align-items: stretch; flex-direction: column; }
   .planHeader { align-items: stretch; flex-direction: column; }
+  .notionArchitecture { grid-template-columns: 1fr; }
 }

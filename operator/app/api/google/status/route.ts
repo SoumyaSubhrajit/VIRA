@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    return NextResponse.json(getGoogleConnectionStatus());
+    return NextResponse.json(await getGoogleConnectionStatus());
   } catch (error) {
     console.error('[api/google/status GET]', error);
     return NextResponse.json({ error: 'Failed to read Google connection status.' }, { status: 500 });
@@ -24,9 +24,9 @@ export async function PATCH(request: NextRequest) {
       }
     }
     if (Object.keys(update).length === 0) return NextResponse.json({ error: 'No Google preference was provided.' }, { status: 400 });
-    const connection = updateGoogleConnection(update);
+    const connection = await updateGoogleConnection(update);
     if (!connection) return NextResponse.json({ error: 'Google account is not connected.' }, { status: 409 });
-    return NextResponse.json(getGoogleConnectionStatus());
+    return NextResponse.json(await getGoogleConnectionStatus());
   } catch (error) {
     console.error('[api/google/status PATCH]', error);
     return NextResponse.json({ error: 'Failed to update Google preferences.' }, { status: 500 });
@@ -35,9 +35,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE() {
   try {
-    const authorized = getAuthorizedGoogleClient();
+    const authorized = await getAuthorizedGoogleClient();
     if (authorized) await authorized.client.revokeCredentials().catch(() => undefined);
-    deleteGoogleConnection();
+    await deleteGoogleConnection();
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('[api/google/status DELETE]', error);

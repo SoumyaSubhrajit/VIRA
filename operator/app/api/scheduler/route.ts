@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     if (!isValidDate(date)) {
       return NextResponse.json({ error: 'A valid date query in YYYY-MM-DD format is required.' }, { status: 400 });
     }
-    return NextResponse.json(getSchedulerSnapshot(date));
+    return NextResponse.json(await getSchedulerSnapshot(date));
   } catch (error) {
     console.error('[api/scheduler GET]', error);
     return NextResponse.json({ error: 'Failed to load the daily scheduler.' }, { status: 500 });

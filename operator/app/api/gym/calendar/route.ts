@@ -3,7 +3,7 @@ import { getFullCalendar, updateGymDay } from '@/lib/gymData';
 
 export async function GET() {
   try {
-    const data = getFullCalendar('default-user');
+    const data = await getFullCalendar('default-user');
     return NextResponse.json(data);
   } catch (err) {
     console.error('[api/gym/calendar GET]', err);

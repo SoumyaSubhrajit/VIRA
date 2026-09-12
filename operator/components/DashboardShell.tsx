@@ -127,7 +127,7 @@ export default function DashboardShell() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <FinancePanel data={finance} loading={loadingInitial} />
+          <FinancePanel data={finance} loading={loadingInitial} onRefresh={fetchData} />
           <GuidePanel entries={memory} loading={refreshing} />
         </div>
       </div>

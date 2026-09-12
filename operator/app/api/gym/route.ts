@@ -3,7 +3,7 @@ import { getGymData } from '@/lib/gymData';
 
 export async function GET() {
   try {
-    const data = getGymData('default-user');
+    const data = await getGymData('default-user');
     return NextResponse.json(data);
   } catch (err) {
     console.error('[api/gym]', err);
