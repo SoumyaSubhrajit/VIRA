@@ -16,7 +16,7 @@
     "@react-email/render": "^2.0.9",
     "@tursodatabase/serverless": "^1.4.0",
     "@vercel/blob": "^2.8.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "exceljs": "^4.4.0",
     "google-auth-library": "^11.0.2",
     "jose": "^6.2.12",
