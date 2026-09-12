@@ -11,6 +11,7 @@ export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',
 ] as const;
 
 export const EXPECTED_GOOGLE_EMAIL = process.env.GOOGLE_ACCOUNT_EMAIL?.trim().toLowerCase()
@@ -80,8 +81,8 @@ export function createGoogleAuthorizationUrl(state: string): string {
   });
 }
 
-export function getGoogleConnectionStatus(): GoogleConnectionStatus {
-  const connection = getGoogleConnection();
+export async function getGoogleConnectionStatus(): Promise<GoogleConnectionStatus> {
+  const connection = await getGoogleConnection();
   return {
     configured: googleOAuthConfigured(),
     connected: Boolean(connection),
@@ -91,20 +92,21 @@ export function getGoogleConnectionStatus(): GoogleConnectionStatus {
     calendarSyncEnabled: connection?.calendarSyncEnabled ?? true,
     tasksSyncEnabled: connection?.tasksSyncEnabled ?? true,
     gmailSendEnabled: connection?.gmailSendEnabled ?? true,
+    gmailReadAuthorized: connection?.scopes.includes('https://www.googleapis.com/auth/gmail.readonly') ?? false,
     taskListTitle: connection?.taskListTitle ?? null,
     connectedAt: connection?.connectedAt ?? null,
   };
 }
 
-export function getAuthorizedGoogleClient(): { client: OAuth2Client; connection: DecryptedGoogleConnection } | null {
-  const stored = getGoogleConnection();
+export async function getAuthorizedGoogleClient(): Promise<{ client: OAuth2Client; connection: DecryptedGoogleConnection } | null> {
+  const stored = await getGoogleConnection();
   if (!stored) return null;
   const tokens = decryptGoogleTokens(stored.encryptedTokens);
   const client = createGoogleOAuthClient();
   client.setCredentials(tokens);
   client.on('tokens', (freshTokens) => {
     const merged = { ...tokens, ...freshTokens, refresh_token: freshTokens.refresh_token ?? tokens.refresh_token };
-    updateGoogleConnection({ encryptedTokens: encryptGoogleTokens(merged) });
+    void updateGoogleConnection({ encryptedTokens: encryptGoogleTokens(merged) });
   });
   return { client, connection: { ...stored, tokens } };
 }

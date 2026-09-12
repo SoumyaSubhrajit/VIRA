@@ -26,3 +26,6 @@ Thumbs.db
 *.swo
 
 # Lock files (optional, depending on if you want to commit them at root. Usually committed at subfolder level)
+# Local Android build tool cache and personal debug artifact
+.android-tools/
+/VIRA-Capture-debug.apk

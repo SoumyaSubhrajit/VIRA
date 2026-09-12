@@ -158,7 +158,7 @@ async function deliverEmail(input: {
 }
 
 export async function dispatchDueReminders(now = new Date()): Promise<ReminderDispatchResult> {
-  const settings = getSchedulerSettings();
+  const settings = await getSchedulerSettings();
   if (!settings.emailEnabled || !settings.reminderEmail) {
     return { sent: 0, failed: 0, skipped: 1, reason: 'Email reminders are disabled or no reminder email is configured.' };
   }
@@ -166,7 +166,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
   const apiKey = process.env.RESEND_API_KEY;
   const resend = apiKey ? new Resend(apiKey) : null;
   const from = process.env.REMINDER_FROM_EMAIL || 'VIRA Scheduler <onboarding@resend.dev>';
-  const tasks = getPendingReminderTasks(now);
+  const tasks = await getPendingReminderTasks(now);
   let sent = 0;
   let failed = 0;
   let taskRemindersSent = 0;
@@ -204,16 +204,16 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
     } else {
       sent += 1;
       taskRemindersSent += 1;
-      markReminderSent(task.id, now.toISOString());
+      await markReminderSent(task.id, now.toISOString());
     }
   }
 
   const checkInSlot = getDueCheckInSlot(now, settings);
   if (checkInSlot) {
-    const plan = getDayPlan(checkInSlot.planDate);
+    const plan = await getDayPlan(checkInSlot.planDate);
     const lastSent = plan.hourlyLastSentAt ? zonedParts(new Date(plan.hourlyLastSentAt), settings.timezone) : null;
     const lastSlotKey = lastSent ? `${lastSent.dateKey}T${minutesToTime(lastSent.minutes)}` : null;
-    const planTasks = plan.locked ? getTasksForDate(checkInSlot.planDate) : [];
+    const planTasks = plan.locked ? await getTasksForDate(checkInSlot.planDate) : [];
     const progress = planProgress(planTasks, settings.timezone);
     const allCompleted = progress.total > 0 && progress.completed === progress.total;
     const finalProgressAlreadySent = allCompleted
@@ -272,7 +272,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
       } else {
         sent += 1;
         focusCheckInsSent += 1;
-        markDayPlanHourlySent(checkInSlot.planDate, now.toISOString());
+        await markDayPlanHourlySent(checkInSlot.planDate, now.toISOString());
       }
     }
   }

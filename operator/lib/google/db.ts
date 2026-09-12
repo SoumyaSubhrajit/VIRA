@@ -26,8 +26,10 @@ type LinkRow = {
   sync_error: string | null;
 };
 
-function initialize(): void {
-  getSchedulerDb().exec(`
+let initialization: Promise<void> | null = null;
+
+function initialize(): Promise<void> {
+  initialization ??= (async () => (await getSchedulerDb()).exec(`
     CREATE TABLE IF NOT EXISTS google_connections (
       user_id TEXT PRIMARY KEY,
       email TEXT NOT NULL,
@@ -50,7 +52,8 @@ function initialize(): void {
       synced_at TEXT,
       sync_error TEXT
     );
-  `);
+  `))();
+  return initialization;
 }
 
 function mapConnection(row: ConnectionRow): GoogleConnectionRecord {
@@ -80,20 +83,20 @@ function mapLink(row: LinkRow): GoogleTaskLink {
   };
 }
 
-export function getGoogleConnection(userId = DEFAULT_USER_ID): GoogleConnectionRecord | null {
-  initialize();
-  const row = getSchedulerDb().prepare('SELECT * FROM google_connections WHERE user_id = ?').get(userId) as ConnectionRow | undefined;
+export async function getGoogleConnection(userId = DEFAULT_USER_ID): Promise<GoogleConnectionRecord | null> {
+  await initialize();
+  const row = await (await getSchedulerDb()).prepare('SELECT * FROM google_connections WHERE user_id = ?').get<ConnectionRow>(userId);
   return row ? mapConnection(row) : null;
 }
 
-export function saveGoogleConnection(
+export async function saveGoogleConnection(
   input: Omit<GoogleConnectionRecord, 'userId' | 'connectedAt' | 'updatedAt'>,
   userId = DEFAULT_USER_ID
-): GoogleConnectionRecord {
-  initialize();
-  const existing = getGoogleConnection(userId);
+): Promise<GoogleConnectionRecord> {
+  await initialize();
+  const existing = await getGoogleConnection(userId);
   const now = new Date().toISOString();
-  getSchedulerDb().prepare(`
+  await (await getSchedulerDb()).prepare(`
     INSERT INTO google_connections (
       user_id, email, encrypted_tokens, scopes, task_list_id, task_list_title, calendar_id,
       calendar_sync_enabled, tasks_sync_enabled, gmail_send_enabled, connected_at, updated_at
@@ -123,10 +126,10 @@ export function saveGoogleConnection(
     existing?.connectedAt ?? now,
     now
   );
-  return getGoogleConnection(userId) as GoogleConnectionRecord;
+  return await getGoogleConnection(userId) as GoogleConnectionRecord;
 }
 
-export function updateGoogleConnection(
+export async function updateGoogleConnection(
   input: Partial<Pick<GoogleConnectionRecord,
     | 'encryptedTokens'
     | 'scopes'
@@ -137,8 +140,8 @@ export function updateGoogleConnection(
     | 'gmailSendEnabled'
   >>,
   userId = DEFAULT_USER_ID
-): GoogleConnectionRecord | null {
-  const current = getGoogleConnection(userId);
+): Promise<GoogleConnectionRecord | null> {
+  const current = await getGoogleConnection(userId);
   if (!current) return null;
   return saveGoogleConnection({
     email: current.email,
@@ -153,24 +156,24 @@ export function updateGoogleConnection(
   }, userId);
 }
 
-export function deleteGoogleConnection(userId = DEFAULT_USER_ID): void {
-  initialize();
-  const db = getSchedulerDb();
-  db.transaction(() => {
-    db.prepare('DELETE FROM google_task_links').run();
-    db.prepare('DELETE FROM google_connections WHERE user_id = ?').run(userId);
+export async function deleteGoogleConnection(userId = DEFAULT_USER_ID): Promise<void> {
+  await initialize();
+  const db = await getSchedulerDb();
+  await db.transaction(async (transaction) => {
+    await transaction.prepare('DELETE FROM google_task_links').run();
+    await transaction.prepare('DELETE FROM google_connections WHERE user_id = ?').run(userId);
   })();
 }
 
-export function getGoogleTaskLink(localTaskId: string): GoogleTaskLink | null {
-  initialize();
-  const row = getSchedulerDb().prepare('SELECT * FROM google_task_links WHERE local_task_id = ?').get(localTaskId) as LinkRow | undefined;
+export async function getGoogleTaskLink(localTaskId: string): Promise<GoogleTaskLink | null> {
+  await initialize();
+  const row = await (await getSchedulerDb()).prepare('SELECT * FROM google_task_links WHERE local_task_id = ?').get<LinkRow>(localTaskId);
   return row ? mapLink(row) : null;
 }
 
-export function saveGoogleTaskLink(link: GoogleTaskLink): GoogleTaskLink {
-  initialize();
-  getSchedulerDb().prepare(`
+export async function saveGoogleTaskLink(link: GoogleTaskLink): Promise<GoogleTaskLink> {
+  await initialize();
+  await (await getSchedulerDb()).prepare(`
     INSERT INTO google_task_links (local_task_id, calendar_event_id, google_task_id, synced_at, sync_error)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(local_task_id) DO UPDATE SET
@@ -179,10 +182,10 @@ export function saveGoogleTaskLink(link: GoogleTaskLink): GoogleTaskLink {
       synced_at = excluded.synced_at,
       sync_error = excluded.sync_error
   `).run(link.localTaskId, link.calendarEventId, link.googleTaskId, link.syncedAt, link.syncError);
-  return getGoogleTaskLink(link.localTaskId) as GoogleTaskLink;
+  return await getGoogleTaskLink(link.localTaskId) as GoogleTaskLink;
 }
 
-export function deleteGoogleTaskLink(localTaskId: string): void {
-  initialize();
-  getSchedulerDb().prepare('DELETE FROM google_task_links WHERE local_task_id = ?').run(localTaskId);
+export async function deleteGoogleTaskLink(localTaskId: string): Promise<void> {
+  await initialize();
+  await (await getSchedulerDb()).prepare('DELETE FROM google_task_links WHERE local_task_id = ?').run(localTaskId);
 }

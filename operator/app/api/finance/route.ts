@@ -3,7 +3,7 @@ import { getFinanceData } from '@/lib/financeData';
 
 export async function GET() {
   try {
-    const data = getFinanceData('default-user');
+    const data = await getFinanceData('default-user');
     return NextResponse.json(data);
   } catch (err) {
     console.error('[api/finance]', err);

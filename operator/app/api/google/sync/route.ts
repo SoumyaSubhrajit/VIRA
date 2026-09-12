@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     if (typeof body.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
       return NextResponse.json({ error: 'A valid date is required.' }, { status: 400 });
     }
-    if (!getGoogleConnectionStatus().connected) {
+    if (!(await getGoogleConnectionStatus()).connected) {
       return NextResponse.json({ error: 'Google account is not connected.' }, { status: 409 });
     }
     const results = await syncDateToGoogle(body.date);

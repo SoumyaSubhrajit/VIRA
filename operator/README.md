@@ -1,7 +1,6 @@
 # Operator — Personal Mission Control
 
-A personal tactical dashboard built with Next.js, Tailwind CSS, Recharts, and the Gemini API.
-It reads local Excel files (`gym.xlsx`, `finance.xlsx`, `career.xlsx`) and displays them as live panels, monitored by an AI "Guide" that surfaces patterns and risks.
+A personal tactical dashboard built with Next.js, Tailwind CSS, Recharts, SQLite/Turso, and the Gemini API. Local development uses SQLite; production uses Turso, private Vercel Blob storage, and an owner login.
 
 ## Setup Instructions
 
@@ -17,16 +16,31 @@ It reads local Excel files (`gym.xlsx`, `finance.xlsx`, `career.xlsx`) and displ
    ```
 
 3. **Data Files:**
-   Place your Excel files in the `data/` directory:
-   - `data/gym.xlsx` (Requires a "6-Month Calendar" sheet)
-   - `data/finance.xlsx` (Currently using mock data, wait for v2 spec to connect real file)
-   - `data/career.xlsx` (Currently using mock data, wait for v2 spec to connect real file)
+   - Local Gym data lives in `data/vira-scheduler.sqlite`. When `TURSO_DATABASE_URL` is set, all application data uses the remote Turso database instead.
+   - Progress photos use private Vercel Blob storage in production and `data/gym-photos/` during local development.
+   - Finance and career retain their existing data integrations.
 
 4. **Run the App:**
    ```bash
    npm run dev
    ```
-   Open [http://localhost:3100](http://localhost:3100)
+Open [http://localhost:3100](http://localhost:3100)
+
+## Gym OS
+
+Open [http://localhost:3100/gym](http://localhost:3100/gym). The Gym OS provides:
+
+- A Monday-to-Saturday Legs / Chest / Back / Shoulders / Chest / Back plan with Sunday recovery.
+- A draggable weekly command rail: drag any workout day onto another to swap their assignments; swaps persist by date and can be changed again later.
+- Working-set logging for load, reps, RIR, pain, warm-ups, notes, session duration, and post-workout fatigue.
+- Daily weight and recovery check-ins, weekly body measurements, private progress-photo references, volume, streaks, completion, and estimated one-rep-max records.
+- Editable workout templates and body-composition, nutrition, water, step, and session-time targets.
+- A six-stage Gmail sequence derived from the configured training time: workout briefing 30 minutes before, launch command 5 minutes before, three checkpoints across the session, and a closing VIRA debrief at the scheduled finish.
+- Automatic creation of the workout as a Builder task in Daily Command, with Google Calendar and Google Tasks synchronization when the account is connected.
+
+SQLite/Turso is the source of truth after the one-time workbook migration. Future Gym OS changes do not modify the Excel file.
+
+For the current 9:00–10:30 PM training window, emails run at 8:30 PM, 8:55 PM, 9:15 PM, 9:45 PM, 10:15 PM, and 10:30 PM in Asia/Kolkata. Each email includes muscle focus, the complete exercise prescription, previous or current working sets, live completion progress, and the next action. In production, an external cron service calls `/api/cron/tick` every minute; no permanently running Node process is required.
 
 ## Daily Command scheduler
 
@@ -36,7 +50,7 @@ Open [http://localhost:3100/scheduler](http://localhost:3100/scheduler) to creat
 - **Builder** — focused execution for career, goals, and achievement.
 - **Free Self** — recovery, creativity, freedom, and wellbeing.
 
-Tasks, times, statuses, personality modes, and reminder settings are stored locally in `data/vira-scheduler.sqlite`. This database and its SQLite sidecar files are ignored by Git.
+Tasks, times, statuses, personality modes, and reminder settings are stored in SQLite locally and Turso in production. Local database files are ignored by Git.
 
 Browser reminders require the scheduler page to stay open and the user to click **Enable browser reminders** once. For email reminders, set these values in `.env.local` and run the reminder worker beside the app:
 
@@ -53,7 +67,7 @@ Task times use explicit 12-hour hour/minute/AM-PM controls while the database st
 
 Finish entering a day's tasks, then select **Lock plan + hourly emails**. While that day is locked, VIRA sends a duplicate-safe email every hour inside the configured window. The window may cross midnight (for example, 3:00 AM through 2:00 AM the following day). Every email includes a completion percentage, visual progress bar, complete task timeline, remaining work, current/next objective, operating mode, and review questions. Once every task is complete, one final 100% email is sent and further hourly messages stop.
 
-The reminder email address and focus window are configured from the scheduler page and saved only in the local database. In production, call `POST /api/scheduler/dispatch` once per minute from a protected cron job using `Authorization: Bearer <SCHEDULER_SECRET>` instead of relying on the local worker.
+The reminder email address and focus window are configured from the scheduler page. In production, call `POST /api/cron/tick` once per minute with `Authorization: Bearer <SCHEDULER_SECRET>`. Call `POST /api/finance/import` once daily with the same header.
 
 ## Google Calendar, Tasks, and Gmail
 
@@ -83,9 +97,8 @@ GOOGLE_ACCOUNT_EMAIL=soumyasubhrajit@gmail.com
 Restart VIRA, open `/scheduler`, and select **Connect Google account** in Google Command Center. OAuth refresh tokens are AES-256-GCM encrypted before being stored in the ignored local SQLite database; the Google password is never handled or stored by VIRA.
 
 ## Architecture Notes
-- All Excel parsing happens server-side in API routes (`/api/gym`, etc.).
+- Gym OS uses normalized SQLite-compatible tables accessed through `/api/gym/os`; Excel is read only for the one-time legacy migration.
 - The AI Guide uses `gemini-2.0-flash` to process a summary of all panels.
-- Agent memory is persisted to `data/agent_memory.json`.
-- Daily Command data is persisted in a local SQLite database and accessed through `/api/scheduler/*` route handlers.
+- Agent memory and Daily Command data are persisted in the shared SQLite/Turso database.
 - Google integration uses Google's Node.js OAuth client with the documented Calendar, Tasks, and Gmail REST endpoints, offline OAuth, encrypted refresh-token storage, state validation, and narrow Calendar-events, Tasks, Gmail-send, and identity scopes.
 - The data layer (`src/lib/`) abstracts file access and accepts a `userId`, making the app structurally ready for multi-tenancy in the future.

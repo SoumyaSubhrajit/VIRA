@@ -1,6 +1,6 @@
 // ─── Gym ─────────────────────────────────────────────────────────────────────
 
-export type DayType = 'Push' | 'Pull' | 'Legs' | 'Rest';
+export type DayType = string;
 
 export interface GymDay {
   date: string;       // ISO string
@@ -36,6 +36,8 @@ export interface FinanceData {
   savingsRate: number;           // 0-1
   categories: FinanceCategory[];
   isMock: boolean;
+  transactionCount?: number;
+  lastImportAt?: string | null;
 }
 
 // ─── Career ──────────────────────────────────────────────────────────────────

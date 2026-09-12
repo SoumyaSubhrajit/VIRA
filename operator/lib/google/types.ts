@@ -32,6 +32,7 @@ export interface GoogleConnectionStatus {
   calendarSyncEnabled: boolean;
   tasksSyncEnabled: boolean;
   gmailSendEnabled: boolean;
+  gmailReadAuthorized: boolean;
   taskListTitle: string | null;
   connectedAt: string | null;
 }

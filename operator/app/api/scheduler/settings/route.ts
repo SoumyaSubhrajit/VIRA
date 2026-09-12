@@ -26,7 +26,7 @@ function validateTime(value: unknown, field: string): string {
 
 export async function GET() {
   try {
-    return NextResponse.json(getSchedulerSettings());
+    return NextResponse.json(await getSchedulerSettings());
   } catch (error) {
     console.error('[api/scheduler/settings GET]', error);
     return NextResponse.json({ error: 'Failed to load reminder settings.' }, { status: 500 });
@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest) {
     if (Object.keys(update).length === 0) {
       throw new SchedulerValidationError('At least one settings field must be provided.');
     }
-    return NextResponse.json(updateSchedulerSettings(update));
+    return NextResponse.json(await updateSchedulerSettings(update));
   } catch (error) {
     if (error instanceof SchedulerValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

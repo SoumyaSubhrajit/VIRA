@@ -8,6 +8,8 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
+import { ChangeEvent, useState } from 'react';
+import Link from 'next/link';
 import type { FinanceData } from '@/lib/types';
 import StatCard from './StatCard';
 import ProgressBar from './ProgressBar';
@@ -15,6 +17,7 @@ import ProgressBar from './ProgressBar';
 interface FinancePanelProps {
   data: FinanceData | null;
   loading: boolean;
+  onRefresh?: () => Promise<void>;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -40,7 +43,32 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-export default function FinancePanel({ data, loading }: FinancePanelProps) {
+export default function FinancePanel({ data, loading, onRefresh }: FinancePanelProps) {
+  const [importing, setImporting] = useState(false);
+  const [importFeedback, setImportFeedback] = useState('');
+
+  async function uploadStatement(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportFeedback('Reading and classifying statement...');
+    try {
+      const form = new FormData();
+      form.set('statement', file);
+      const response = await fetch('/api/finance/statement', { method: 'POST', body: form });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Statement import failed.');
+      setImportFeedback(body.duplicate
+        ? 'This exact statement was already imported.'
+        : `Imported ${body.imported} of ${body.extracted} extracted transactions.`);
+      await onRefresh?.();
+    } catch (error) {
+      setImportFeedback(error instanceof Error ? error.message : 'Statement import failed.');
+    } finally {
+      setImporting(false);
+      event.target.value = '';
+    }
+  }
   if (loading || !data) {
     return (
       <div className="panel fade-in" style={{ minHeight: '260px' }}>
@@ -66,7 +94,28 @@ export default function FinancePanel({ data, loading }: FinancePanelProps) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
             {data.month}
           </span>
+          <Link href="/finance" style={{ color: 'var(--lime)', textDecoration: 'none', fontFamily: 'var(--font-display)', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>
+            View details →
+          </Link>
         </div>
+      </div>
+
+      {!data.isMock && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+          {data.transactionCount ?? 0} imported transactions · last inbox scan {data.lastImportAt ? new Date(data.lastImportAt).toLocaleString('en-IN') : 'pending'}
+        </div>
+      )}
+
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '10px', display: 'grid', gap: '8px' }}>
+        <span className="label">Statement intake</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+          Email any PDF statement to <strong style={{ color: 'var(--lime)' }}>soumyasubhrajit+vira@gmail.com</strong>, or upload it here. The subject can be anything.
+        </span>
+        <label className="btn" style={{ width: 'fit-content' }}>
+          {importing ? 'IMPORTING...' : 'UPLOAD PDF STATEMENT'}
+          <input type="file" accept="application/pdf,.pdf" disabled={importing} onChange={uploadStatement} style={{ display: 'none' }} />
+        </label>
+        {importFeedback && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--amber)' }}>{importFeedback}</span>}
       </div>
 
       {/* Key stats */}

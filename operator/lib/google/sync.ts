@@ -165,16 +165,16 @@ async function upsertGoogleTask(
 }
 
 export async function syncTaskToGoogle(task: SchedulerTask): Promise<GoogleSyncResult> {
-  let authorized: ReturnType<typeof getAuthorizedGoogleClient>;
+  let authorized: Awaited<ReturnType<typeof getAuthorizedGoogleClient>>;
   try {
-    authorized = getAuthorizedGoogleClient();
+    authorized = await getAuthorizedGoogleClient();
   } catch (error) {
     return { calendar: 'failed', tasks: 'failed', error: googleError(error).message };
   }
   if (!authorized) return { calendar: 'disabled', tasks: 'disabled' };
 
   const { client, connection } = authorized;
-  const link = getGoogleTaskLink(task.id) ?? {
+  const link = await getGoogleTaskLink(task.id) ?? {
     localTaskId: task.id,
     calendarEventId: null,
     googleTaskId: null,
@@ -205,14 +205,14 @@ export async function syncTaskToGoogle(task: SchedulerTask): Promise<GoogleSyncR
 
   link.syncedAt = errors.length === 0 ? new Date().toISOString() : link.syncedAt;
   link.syncError = errors.length ? errors.join(' | ') : null;
-  saveGoogleTaskLink(link);
+  await saveGoogleTaskLink(link);
   return { calendar: calendarStatus, tasks: tasksStatus, ...(errors.length ? { error: errors.join(' | ') } : {}) };
 }
 
 export async function deleteTaskFromGoogle(localTaskId: string): Promise<void> {
-  const link = getGoogleTaskLink(localTaskId);
+  const link = await getGoogleTaskLink(localTaskId);
   if (!link) return;
-  const authorized = getAuthorizedGoogleClient();
+  const authorized = await getAuthorizedGoogleClient();
   if (authorized) {
     const { client, connection } = authorized;
     if (link.calendarEventId) {
@@ -238,7 +238,7 @@ export async function deleteTaskFromGoogle(localTaskId: string): Promise<void> {
       }
     }
   }
-  deleteGoogleTaskLink(localTaskId);
+  await deleteGoogleTaskLink(localTaskId);
 }
 
 function nextDate(date: string): string {
@@ -248,7 +248,7 @@ function nextDate(date: string): string {
 }
 
 export async function getGoogleAgenda(date: string): Promise<GoogleAgendaSnapshot> {
-  const authorized = getAuthorizedGoogleClient();
+  const authorized = await getAuthorizedGoogleClient();
   if (!authorized) throw new Error('Google account is not connected.');
   const { client, connection } = authorized;
   const eventParams = new URLSearchParams({
@@ -294,7 +294,7 @@ export async function getGoogleAgenda(date: string): Promise<GoogleAgendaSnapsho
 
 export async function syncDateToGoogle(date: string): Promise<Array<{ taskId: string; result: GoogleSyncResult }>> {
   const results: Array<{ taskId: string; result: GoogleSyncResult }> = [];
-  for (const task of getTasksForDate(date)) {
+  for (const task of await getTasksForDate(date)) {
     results.push({ taskId: task.id, result: await syncTaskToGoogle(task) });
   }
   return results;

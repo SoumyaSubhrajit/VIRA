@@ -24,6 +24,10 @@
 /data/*.sqlite
 /data/*.sqlite-shm
 /data/*.sqlite-wal
+/data/*.log
+/data/gym-photos/
+/data/agent_memory.json
+/public/VIRA-Capture-debug.apk
 
 # misc
 .DS_Store

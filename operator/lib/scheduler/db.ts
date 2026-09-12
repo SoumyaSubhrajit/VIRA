@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { AsyncDatabase, createDatabase } from '@/lib/database';
 import { PERSONALITY_MODES } from './personalities';
 import type {
   CreateTaskInput,
@@ -72,12 +72,12 @@ type DayPlanRow = {
   updated_at: string;
 };
 
-let database: Database.Database | null = null;
+let databasePromise: Promise<AsyncDatabase> | null = null;
 
-function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+async function ensureColumn(db: AsyncDatabase, table: string, column: string, definition: string): Promise<void> {
+  const columns = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
   if (!columns.some((item) => item.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
 
@@ -90,10 +90,10 @@ function databasePath(): string {
   return configured;
 }
 
-function initialize(db: Database.Database): void {
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.exec(`
+async function initialize(db: AsyncDatabase): Promise<void> {
+  if (!process.env.TURSO_DATABASE_URL) await db.pragma('journal_mode = WAL');
+  await db.pragma('foreign_keys = ON');
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS personality_modes (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -157,50 +157,53 @@ function initialize(db: Database.Database): void {
   `);
 
   // Incremental migration for databases created before recurring check-ins existed.
-  ensureColumn(db, 'scheduler_settings', 'checkin_enabled', 'INTEGER NOT NULL DEFAULT 1');
-  ensureColumn(db, 'scheduler_settings', 'checkin_interval_hours', 'INTEGER NOT NULL DEFAULT 2');
-  ensureColumn(db, 'scheduler_settings', 'checkin_start_time', "TEXT NOT NULL DEFAULT '08:00'");
-  ensureColumn(db, 'scheduler_settings', 'checkin_end_time', "TEXT NOT NULL DEFAULT '22:00'");
-  ensureColumn(db, 'scheduler_settings', 'checkin_last_sent_at', 'TEXT');
-  ensureColumn(db, 'scheduler_tasks', 'end_at', 'TEXT');
+  await ensureColumn(db, 'scheduler_settings', 'checkin_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn(db, 'scheduler_settings', 'checkin_interval_hours', 'INTEGER NOT NULL DEFAULT 2');
+  await ensureColumn(db, 'scheduler_settings', 'checkin_start_time', "TEXT NOT NULL DEFAULT '08:00'");
+  await ensureColumn(db, 'scheduler_settings', 'checkin_end_time', "TEXT NOT NULL DEFAULT '22:00'");
+  await ensureColumn(db, 'scheduler_settings', 'checkin_last_sent_at', 'TEXT');
+  await ensureColumn(db, 'scheduler_tasks', 'end_at', 'TEXT');
 
-  const upsertMode = db.prepare(`
-    INSERT INTO personality_modes (
-      id, name, short_name, purpose, identity_statement, behavior_rules, sort_order
-    ) VALUES (
-      @id, @name, @shortName, @purpose, @identityStatement, @behaviorRules, @sortOrder
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      short_name = excluded.short_name,
-      purpose = excluded.purpose,
-      identity_statement = excluded.identity_statement,
-      behavior_rules = excluded.behavior_rules,
-      sort_order = excluded.sort_order
-  `);
-
-  const seedModes = db.transaction(() => {
+  const seedModes = db.transaction(async (transaction) => {
+    const statement = transaction.prepare(`
+      INSERT INTO personality_modes (
+        id, name, short_name, purpose, identity_statement, behavior_rules, sort_order
+      ) VALUES (
+        @id, @name, @shortName, @purpose, @identityStatement, @behaviorRules, @sortOrder
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        short_name = excluded.short_name,
+        purpose = excluded.purpose,
+        identity_statement = excluded.identity_statement,
+        behavior_rules = excluded.behavior_rules,
+        sort_order = excluded.sort_order
+    `);
     for (const mode of PERSONALITY_MODES) {
-      upsertMode.run({ ...mode, behaviorRules: JSON.stringify(mode.behaviorRules) });
+      await statement.run({ ...mode, behaviorRules: JSON.stringify(mode.behaviorRules) });
     }
   });
-  seedModes();
+  await seedModes();
 
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT OR IGNORE INTO scheduler_settings (
       user_id, subject_name, reminder_email, timezone, email_enabled, browser_enabled, created_at, updated_at
     ) VALUES (?, ?, '', ?, 1, 1, ?, ?)
   `).run(DEFAULT_USER_ID, DEFAULT_SUBJECT_NAME, DEFAULT_TIMEZONE, now, now);
 }
 
-export function getSchedulerDb(): Database.Database {
-  if (database) return database;
-  const filePath = databasePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  database = new Database(filePath);
-  initialize(database);
-  return database;
+export function getSchedulerDb(): Promise<AsyncDatabase> {
+  if (!databasePromise) {
+    databasePromise = (async () => {
+      const filePath = databasePath();
+      if (!process.env.TURSO_DATABASE_URL) fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const database = createDatabase(filePath);
+      await initialize(database);
+      return database;
+    })();
+  }
+  return databasePromise;
 }
 
 function mapTask(row: TaskRow): SchedulerTask {
@@ -256,22 +259,22 @@ function mapSettings(row: SettingsRow): SchedulerSettings {
   };
 }
 
-export function getPersonalities(): PersonalityMode[] {
-  const rows = getSchedulerDb()
+export async function getPersonalities(): Promise<PersonalityMode[]> {
+  const rows = await (await getSchedulerDb())
     .prepare('SELECT * FROM personality_modes ORDER BY sort_order ASC')
-    .all() as PersonalityRow[];
+    .all<PersonalityRow>();
   return rows.map(mapPersonality);
 }
 
-export function getSchedulerSettings(userId = DEFAULT_USER_ID): SchedulerSettings {
-  const row = getSchedulerDb()
+export async function getSchedulerSettings(userId = DEFAULT_USER_ID): Promise<SchedulerSettings> {
+  const row = await (await getSchedulerDb())
     .prepare('SELECT * FROM scheduler_settings WHERE user_id = ?')
-    .get(userId) as SettingsRow | undefined;
+    .get<SettingsRow>(userId);
   if (!row) throw new Error(`Scheduler settings were not found for ${userId}.`);
   return mapSettings(row);
 }
 
-export function updateSchedulerSettings(
+export async function updateSchedulerSettings(
   input: Partial<Pick<SchedulerSettings,
     | 'subjectName'
     | 'reminderEmail'
@@ -285,7 +288,7 @@ export function updateSchedulerSettings(
     | 'checkInLastSentAt'
   >>,
   userId = DEFAULT_USER_ID
-): SchedulerSettings {
+): Promise<SchedulerSettings> {
   const allowed: Record<string, string> = {
     subjectName: 'subject_name',
     reminderEmail: 'reminder_email',
@@ -310,27 +313,38 @@ export function updateSchedulerSettings(
   assignments.push('updated_at = ?');
   values.push(new Date().toISOString(), userId);
 
-  getSchedulerDb()
+  await (await getSchedulerDb())
     .prepare(`UPDATE scheduler_settings SET ${assignments.join(', ')} WHERE user_id = ?`)
     .run(...values);
   return getSchedulerSettings(userId);
 }
 
-export function getTasksForDate(date: string, userId = DEFAULT_USER_ID): SchedulerTask[] {
-  const rows = getSchedulerDb()
+export async function getTasksForDate(date: string, userId = DEFAULT_USER_ID): Promise<SchedulerTask[]> {
+  const rows = await (await getSchedulerDb())
     .prepare(`
       SELECT * FROM scheduler_tasks
       WHERE user_id = ? AND task_date = ?
       ORDER BY scheduled_at ASC, priority ASC, created_at ASC
     `)
-    .all(userId, date) as TaskRow[];
+    .all<TaskRow>(userId, date);
   return rows.map(mapTask);
 }
 
-export function getDayPlan(planDate: string, userId = DEFAULT_USER_ID): SchedulerDayPlan {
-  const row = getSchedulerDb()
+export async function getAllSchedulerTasks(userId = DEFAULT_USER_ID): Promise<SchedulerTask[]> {
+  const rows = await (await getSchedulerDb())
+    .prepare(`
+      SELECT * FROM scheduler_tasks
+      WHERE user_id = ?
+      ORDER BY task_date DESC, scheduled_at ASC, priority ASC, created_at ASC
+    `)
+    .all<TaskRow>(userId);
+  return rows.map(mapTask);
+}
+
+export async function getDayPlan(planDate: string, userId = DEFAULT_USER_ID): Promise<SchedulerDayPlan> {
+  const row = await (await getSchedulerDb())
     .prepare('SELECT * FROM scheduler_day_plans WHERE user_id = ? AND plan_date = ?')
-    .get(userId, planDate) as DayPlanRow | undefined;
+    .get<DayPlanRow>(userId, planDate);
   return {
     userId,
     planDate,
@@ -341,9 +355,9 @@ export function getDayPlan(planDate: string, userId = DEFAULT_USER_ID): Schedule
   };
 }
 
-export function setDayPlanLocked(planDate: string, locked: boolean, userId = DEFAULT_USER_ID): SchedulerDayPlan {
+export async function setDayPlanLocked(planDate: string, locked: boolean, userId = DEFAULT_USER_ID): Promise<SchedulerDayPlan> {
   const now = new Date().toISOString();
-  getSchedulerDb().prepare(`
+  await (await getSchedulerDb()).prepare(`
     INSERT INTO scheduler_day_plans (user_id, plan_date, locked_at, hourly_last_sent_at, updated_at)
     VALUES (?, ?, ?, NULL, ?)
     ON CONFLICT(user_id, plan_date) DO UPDATE SET
@@ -354,25 +368,25 @@ export function setDayPlanLocked(planDate: string, locked: boolean, userId = DEF
   return getDayPlan(planDate, userId);
 }
 
-export function markDayPlanHourlySent(planDate: string, sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): void {
-  getSchedulerDb().prepare(`
+export async function markDayPlanHourlySent(planDate: string, sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): Promise<void> {
+  await (await getSchedulerDb()).prepare(`
     UPDATE scheduler_day_plans
     SET hourly_last_sent_at = ?, updated_at = ?
     WHERE user_id = ? AND plan_date = ? AND locked_at IS NOT NULL
   `).run(sentAt, sentAt, userId, planDate);
 }
 
-export function getTask(id: string, userId = DEFAULT_USER_ID): SchedulerTask | null {
-  const row = getSchedulerDb()
+export async function getTask(id: string, userId = DEFAULT_USER_ID): Promise<SchedulerTask | null> {
+  const row = await (await getSchedulerDb())
     .prepare('SELECT * FROM scheduler_tasks WHERE id = ? AND user_id = ?')
-    .get(id, userId) as TaskRow | undefined;
+    .get<TaskRow>(id, userId);
   return row ? mapTask(row) : null;
 }
 
-export function createTask(input: CreateTaskInput, userId = DEFAULT_USER_ID): SchedulerTask {
+export async function createTask(input: CreateTaskInput, userId = DEFAULT_USER_ID): Promise<SchedulerTask> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getSchedulerDb()
+  await (await getSchedulerDb())
     .prepare(`
       INSERT INTO scheduler_tasks (
         id, user_id, title, details, task_date, start_time, end_time, end_at, scheduled_at,
@@ -401,11 +415,11 @@ export function createTask(input: CreateTaskInput, userId = DEFAULT_USER_ID): Sc
       createdAt: now,
       updatedAt: now,
     });
-  return getTask(id, userId) as SchedulerTask;
+  return await getTask(id, userId) as SchedulerTask;
 }
 
-export function updateTask(id: string, input: UpdateTaskInput, userId = DEFAULT_USER_ID): SchedulerTask | null {
-  if (!getTask(id, userId)) return null;
+export async function updateTask(id: string, input: UpdateTaskInput, userId = DEFAULT_USER_ID): Promise<SchedulerTask | null> {
+  if (!await getTask(id, userId)) return null;
 
   const allowed: Record<string, string> = {
     title: 'title',
@@ -443,23 +457,23 @@ export function updateTask(id: string, input: UpdateTaskInput, userId = DEFAULT_
   assignments.push('updated_at = ?');
   values.push(new Date().toISOString(), id, userId);
 
-  getSchedulerDb()
+  await (await getSchedulerDb())
     .prepare(`UPDATE scheduler_tasks SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?`)
     .run(...values);
   return getTask(id, userId);
 }
 
-export function deleteTask(id: string, userId = DEFAULT_USER_ID): boolean {
-  const result = getSchedulerDb()
+export async function deleteTask(id: string, userId = DEFAULT_USER_ID): Promise<boolean> {
+  const result = await (await getSchedulerDb())
     .prepare('DELETE FROM scheduler_tasks WHERE id = ? AND user_id = ?')
     .run(id, userId);
   return result.changes > 0;
 }
 
-export function getPendingReminderTasks(now = new Date(), userId = DEFAULT_USER_ID): SchedulerTask[] {
+export async function getPendingReminderTasks(now = new Date(), userId = DEFAULT_USER_ID): Promise<SchedulerTask[]> {
   const lower = new Date(now.getTime() - 30 * 60_000).toISOString();
   const upper = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
-  const rows = getSchedulerDb()
+  const rows = await (await getSchedulerDb())
     .prepare(`
       SELECT * FROM scheduler_tasks
       WHERE user_id = ?
@@ -469,7 +483,7 @@ export function getPendingReminderTasks(now = new Date(), userId = DEFAULT_USER_
         AND scheduled_at BETWEEN ? AND ?
       ORDER BY scheduled_at ASC
     `)
-    .all(userId, lower, upper) as TaskRow[];
+    .all<TaskRow>(userId, lower, upper);
 
   return rows.map(mapTask).filter((task) => {
     const scheduled = new Date(task.scheduledAt).getTime();
@@ -478,23 +492,29 @@ export function getPendingReminderTasks(now = new Date(), userId = DEFAULT_USER_
   });
 }
 
-export function markReminderSent(id: string, sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): void {
-  getSchedulerDb()
+export async function markReminderSent(id: string, sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): Promise<void> {
+  await (await getSchedulerDb())
     .prepare('UPDATE scheduler_tasks SET reminder_sent_at = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .run(sentAt, sentAt, id, userId);
 }
 
-export function markCheckInSent(sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): void {
-  updateSchedulerSettings({ checkInLastSentAt: sentAt }, userId);
+export async function markCheckInSent(sentAt = new Date().toISOString(), userId = DEFAULT_USER_ID): Promise<void> {
+  await updateSchedulerSettings({ checkInLastSentAt: sentAt }, userId);
 }
 
-export function getSchedulerSnapshot(date: string, userId = DEFAULT_USER_ID): SchedulerSnapshot {
+export async function getSchedulerSnapshot(date: string, userId = DEFAULT_USER_ID): Promise<SchedulerSnapshot> {
+  const [tasks, personalities, settings, dayPlan] = await Promise.all([
+    getTasksForDate(date, userId),
+    getPersonalities(),
+    getSchedulerSettings(userId),
+    getDayPlan(date, userId),
+  ]);
   return {
     date,
-    tasks: getTasksForDate(date, userId),
-    personalities: getPersonalities(),
-    settings: getSchedulerSettings(userId),
-    dayPlan: getDayPlan(date, userId),
+    tasks,
+    personalities,
+    settings,
+    dayPlan,
     serverTime: new Date().toISOString(),
   };
 }

@@ -13,6 +13,7 @@ import type {
 } from '@/lib/scheduler/types';
 import type { GoogleAgendaSnapshot, GoogleConnectionStatus, GoogleSyncResult } from '@/lib/google/types';
 import styles from './scheduler.module.css';
+import { ObsidianVaultPanel } from '@/components/ObsidianVaultPanel';
 
 const MODE_CLASS: Record<PersonalityId, string> = {
   home: styles.modeHome,
@@ -134,6 +135,20 @@ type SettingsFeedback = {
   message: string;
 };
 
+type NotionStatus = {
+  tokenPresent: boolean;
+  configured: boolean;
+  enabled: boolean;
+  parentPageId: string | null;
+  projectsDataSourceId: string | null;
+  workItemsDataSourceId: string | null;
+  dailyLogsDataSourceId: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  pendingEvents: number;
+  failedEvents: number;
+};
+
 const EMPTY_FORM: TaskForm = {
   title: '',
   details: '',
@@ -168,6 +183,9 @@ export default function SchedulerPage() {
   const [browserBusy, setBrowserBusy] = useState(false);
   const [browserPermission, setBrowserPermission] = useState<'default' | 'denied' | 'granted' | 'unsupported'>('default');
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback | null>(null);
+  const [notionStatus, setNotionStatus] = useState<NotionStatus | null>(null);
+  const [notionParentPage, setNotionParentPage] = useState('');
+  const [notionBusy, setNotionBusy] = useState(false);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (date: string) => {
@@ -211,6 +229,18 @@ export default function SchedulerPage() {
     }
   }, []);
 
+  const loadNotion = useCallback(async () => {
+    try {
+      const response = await fetch('/api/notion/status', { cache: 'no-store' });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to load Notion status.');
+      setNotionStatus(body as NotionStatus);
+    } catch (notionError) {
+      console.error('[scheduler/notion]', notionError);
+      setNotionStatus(null);
+    }
+  }, []);
+
   useEffect(() => {
     setSelectedDate(localDateKey());
     setNow(new Date());
@@ -223,11 +253,14 @@ export default function SchedulerPage() {
   useEffect(() => {
     if (selectedDate) loadGoogle(selectedDate);
   }, [loadGoogle, selectedDate]);
+  useEffect(() => {
+    loadNotion();
+  }, [loadNotion]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const googleResult = params.get('google');
-    if (googleResult === 'connected') setSuccess('Google connected. Calendar, Tasks, and Gmail sync are active.');
+    if (googleResult === 'connected') setSuccess('Google connected. Calendar, Tasks, Gmail reminders, and finance import are active.');
     if (googleResult === 'wrong-account') setError('Wrong Google account selected. Connect the exact account shown in Google Command Center.');
     if (googleResult === 'error') setError('Google connection failed. Check the OAuth setup and try again.');
     if (googleResult) window.history.replaceState({}, '', window.location.pathname);
@@ -553,6 +586,51 @@ export default function SchedulerPage() {
       setError(googleError instanceof Error ? googleError.message : 'Google disconnect failed.');
     } finally {
       setGoogleBusy(false);
+    }
+  }
+
+  async function buildNotionWorkspace() {
+    if (!notionParentPage.trim()) return;
+    const confirmed = window.confirm('Create three databases inside this Notion page: VIRA — Projects, VIRA — Work Items, and VIRA — Daily Logs?');
+    if (!confirmed) return;
+    setNotionBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/notion/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentPage: notionParentPage }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Failed to build Notion workspace.');
+      setSuccess('Notion production workspace created. Existing VIRA tasks and daily logs were queued and synchronized.');
+      await loadNotion();
+    } catch (notionError) {
+      setError(notionError instanceof Error ? notionError.message : 'Failed to build Notion workspace.');
+    } finally {
+      setNotionBusy(false);
+    }
+  }
+
+  async function syncNotionNow() {
+    setNotionBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/notion/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: selectedDate, reconcile: true }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Notion sync failed.');
+      setSuccess(`Notion sync complete: ${body.processed} update${body.processed === 1 ? '' : 's'} sent${body.failed ? `, ${body.failed} waiting for retry` : ''}.`);
+      await loadNotion();
+    } catch (notionError) {
+      setError(notionError instanceof Error ? notionError.message : 'Notion sync failed.');
+    } finally {
+      setNotionBusy(false);
     }
   }
 
@@ -925,7 +1003,7 @@ export default function SchedulerPage() {
                 <div className={styles.empty}>Checking Google connection...</div>
               ) : !googleStatus.configured ? (
                 <div className={styles.googleSetup}>
-                  <p>One Google Cloud OAuth client is required. VIRA requests only Calendar events, Google Tasks, Gmail send-only, and account identity.</p>
+                  <p>One Google Cloud OAuth client is required. VIRA requests Calendar events, Google Tasks, Gmail sending, read-only Gmail access for transaction alerts, and account identity.</p>
                   <ol>
                     <li>Enable Calendar API, Tasks API, and Gmail API.</li>
                     <li>Create a Web OAuth client and add this redirect URI:</li>
@@ -940,7 +1018,7 @@ export default function SchedulerPage() {
                   <ul>
                     <li>Create and update Calendar events.</li>
                     <li>Create and update tasks in “VIRA Daily Command”.</li>
-                    <li>Send reminders from your Gmail account.</li>
+                    <li>Send reminders and read transaction-alert emails for the finance tracker.</li>
                   </ul>
                   <a className={styles.buttonLinkPrimary} href="/api/google/connect">Connect Google account →</a>
                 </div>
@@ -962,9 +1040,74 @@ export default function SchedulerPage() {
                     <span><strong>Gmail reminders</strong><small>Send from your own account</small></span>
                     <input type="checkbox" disabled={googleBusy} checked={googleStatus.gmailSendEnabled} onChange={(event) => updateGooglePreference('gmailSendEnabled', event.target.checked)} />
                   </label>
+                  <div className={styles.integrationRow}>
+                    <span>
+                      <strong>Daily finance import</strong>
+                      <small>{googleStatus.gmailReadAuthorized ? 'Authorized · runs automatically at 2:15 AM IST' : 'Reconnect once to grant read-only Gmail access'}</small>
+                    </span>
+                    {!googleStatus.gmailReadAuthorized && <a className={styles.buttonLinkPrimary} href="/api/google/connect">Authorize</a>}
+                  </div>
                   <div className={styles.googleActions}>
                     <button className={styles.buttonPrimary} disabled={googleBusy} onClick={syncGoogleNow}>{googleBusy ? 'Syncing...' : 'Sync this day'}</button>
                     <button className={styles.buttonDanger} disabled={googleBusy} onClick={disconnectGoogle}>Disconnect</button>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <ObsidianVaultPanel selectedDate={selectedDate} />
+
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2 className={styles.panelTitle}>Notion Production Sync</h2>
+                <span className={`${styles.connectionBadge} ${notionStatus?.configured ? '' : styles.connectionBadgeIdle}`}>
+                  {notionStatus?.configured ? 'Operational' : notionStatus?.tokenPresent ? 'Ready to build' : 'Token required'}
+                </span>
+              </div>
+              {!notionStatus ? (
+                <div className={styles.empty}>Checking Notion connection...</div>
+              ) : !notionStatus.tokenPresent ? (
+                <div className={styles.googleSetup}>
+                  <p>VIRA is ready for a private Notion integration. The token never leaves the server and is never returned to this page.</p>
+                  <ol>
+                    <li>Create a Notion internal integration with read, insert, and update content access.</li>
+                    <li>Put its secret in <strong>operator/.env.local</strong> as <strong>NOTION_TOKEN</strong>, then restart VIRA.</li>
+                    <li>Create a blank “VIRA HQ” page and share it with that integration.</li>
+                  </ol>
+                  <a className={styles.buttonLink} href="https://www.notion.so/profile/integrations" target="_blank" rel="noreferrer">Open Notion integrations →</a>
+                </div>
+              ) : !notionStatus.configured ? (
+                <div className={styles.googleSetup}>
+                  <p>Paste the URL of the blank Notion page shared with the VIRA integration. VIRA will create the professional operating system inside it.</p>
+                  <div className={styles.notionArchitecture}>
+                    <span><strong>Projects</strong><small>Outcomes, owners, targets</small></span>
+                    <span><strong>Work Items</strong><small>Tasks, bugs, definitions of done</small></span>
+                    <span><strong>Daily Logs</strong><small>Progress, focus time, carry-forward</small></span>
+                  </div>
+                  <input className={styles.input} value={notionParentPage} onChange={(event) => setNotionParentPage(event.target.value)} placeholder="https://www.notion.so/... or page ID" />
+                  <div className={styles.formActions}>
+                    <button className={styles.buttonPrimary} disabled={notionBusy || !notionParentPage.trim()} onClick={buildNotionWorkspace}>
+                      {notionBusy ? 'Building...' : 'Build VIRA workspace'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.googleConnected}>
+                  <div className={styles.notionArchitecture}>
+                    <span><strong>Projects</strong><small>Connected</small></span>
+                    <span><strong>Work Items</strong><small>Connected</small></span>
+                    <span><strong>Daily Logs</strong><small>Connected</small></span>
+                  </div>
+                  <div className={styles.integrationRow}>
+                    <span><strong>Durable sync queue</strong><small>{notionStatus.pendingEvents} pending · {notionStatus.failedEvents} retrying</small></span>
+                    <span className={styles.connectionBadge}>Active</span>
+                  </div>
+                  <div className={styles.integrationRow}>
+                    <span><strong>Last synchronization</strong><small>{notionStatus.lastSyncAt ? new Date(notionStatus.lastSyncAt).toLocaleString() : 'Waiting for first run'}</small></span>
+                  </div>
+                  {notionStatus.lastError && <div className={styles.settingsFeedbackError}><strong>Retrying automatically</strong><span>{notionStatus.lastError}</span></div>}
+                  <div className={styles.formActions}>
+                    <button className={styles.buttonPrimary} disabled={notionBusy} onClick={syncNotionNow}>{notionBusy ? 'Syncing...' : 'Sync this day'}</button>
                   </div>
                 </div>
               )}
