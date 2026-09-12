@@ -20,7 +20,7 @@
     "exceljs": "^4.4.0",
     "google-auth-library": "^11.0.2",
     "jose": "^6.2.12",
-    "next": "^16.3.3",
+    "next": "^16.3.4",
     "node-cron": "^4.2.1",
     "pdf-parse": "^2.4.5",
     "react": "19.2.4",
