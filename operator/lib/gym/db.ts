@@ -320,7 +320,9 @@ async function initialize(database: AsyncDatabase) {
   }
 
   await migrateLegacyWorkbook(database);
-  await database.pragma('optimize');
+  // Turso's HTTP driver rejects PRAGMA optimize (400), while SQLite accepts it.
+  // It is an optional maintenance hint, so keep it for local SQLite only.
+  if (!process.env.TURSO_DATABASE_URL) await database.pragma('optimize');
 }
 
 function excelDate(value: unknown): string | null {
