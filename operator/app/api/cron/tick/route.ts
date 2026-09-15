@@ -8,11 +8,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function authorized(request: NextRequest): boolean {
-  const secret = process.env.SCHEDULER_SECRET;
-  return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`);
+  if (request.headers.get('x-vercel-cron') === '1') return true;
+  const secret = process.env.SCHEDULER_SECRET || process.env.CRON_SECRET;
+  if (!secret) return process.env.NODE_ENV !== 'production';
+  return request.headers.get('authorization') === `Bearer ${secret}`;
 }
 
-export async function POST(request: NextRequest) {
+async function handleTick(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
   const names = ['scheduler', 'gym', 'finance', 'notion'] as const;
@@ -30,4 +32,12 @@ export async function POST(request: NextRequest) {
   ]));
   const failed = settled.filter((result) => result.status === 'rejected').length;
   return NextResponse.json({ ok: failed === 0, failed, results }, { status: failed === settled.length ? 500 : 200 });
+}
+
+export async function GET(request: NextRequest) {
+  return handleTick(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleTick(request);
 }

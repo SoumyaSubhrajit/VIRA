@@ -1,0 +1,17 @@
+name: VIRA Reminders Cron Dispatch
+
+on:
+  schedule:
+    # Run every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  dispatch-tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger VIRA Cron Tick
+        run: |
+          curl -s -X POST https://vira-two-tau.vercel.app/api/cron/tick \
+            -H "Authorization: Bearer ${{ secrets.SCHEDULER_SECRET }}" \
+            -H "Content-Type: application/json"
