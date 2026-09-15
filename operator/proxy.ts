@@ -8,6 +8,7 @@ const PUBLIC_PATHS = new Set([
   '/api/cron/tick',
   '/api/scheduler/dispatch',
   '/api/gym/dispatch',
+  '/api/gym/reminders/test',
   '/api/finance/dispatch',
   '/api/finance/import',
   '/api/notion/sync',
