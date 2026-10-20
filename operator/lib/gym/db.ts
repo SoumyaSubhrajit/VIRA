@@ -48,9 +48,12 @@ const PROGRAM: TemplateSeed[] = [
       { name: 'Smith Incline Press', muscleGroup: 'Upper chest', targetSets: 4, minReps: 6, maxReps: 10, restSeconds: 150 },
       { name: 'Super Incline Machine Press', muscleGroup: 'Upper chest', targetSets: 4, minReps: 6, maxReps: 10, restSeconds: 150 },
       { name: 'Cable Low to High', muscleGroup: 'Upper chest', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 75 },
-      { name: 'Skull Crusher', muscleGroup: 'Triceps', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 90 },
       { name: 'Overhead Cable Extension', muscleGroup: 'Triceps', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 75 },
       { name: 'Rope Pushdown', muscleGroup: 'Triceps', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 75 },
+      { name: 'One hand rope pull down', muscleGroup: 'General', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 75 },
+      { name: 'Hang raise', muscleGroup: 'General', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 60 },
+      { name: 'crunches', muscleGroup: 'General', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 60 },
+      { name: 'Biceps curl', muscleGroup: 'General', targetSets: 3, minReps: 10, maxReps: 15, restSeconds: 75 },
     ],
   },
   {
