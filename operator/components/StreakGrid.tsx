@@ -9,45 +9,49 @@ export default function StreakGrid({ days }: StreakGridProps) {
 
   return (
     <div>
-      <span className="label" style={{ marginBottom: '8px', display: 'flex' }}>
-        7-Day Streak
+      <span
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: '11px',
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: 'var(--text-muted)',
+          marginBottom: '8px',
+          display: 'block',
+        }}
+      >
+        7-Day Consistency
       </span>
-      <div style={{ display: 'flex', gap: '6px' }}>
+      <div style={{ display: 'flex', gap: '8px' }}>
         {days.map((day) => {
           const isToday = day.date === today;
           const isRest = day.dayType === 'Rest';
 
-          let bg = 'var(--bg-inset)';
-          let border = 'var(--border-subtle)';
-          let glow = 'none';
+          let bg = 'var(--bg-base)';
+          let border = 'var(--border-default)';
+          let textColor = 'var(--text-muted)';
 
           if (isRest) {
-            bg = 'var(--border-subtle)';
-            border = 'var(--border-subtle)';
+            bg = '#F1F5F9';
+            border = '#E2E8F0';
+            textColor = '#94A3B8';
           } else if (day.completed === true) {
-            bg = 'var(--lime-dim)';
-            border = 'var(--lime)';
-            glow = '0 0 8px var(--lime-glow)';
+            bg = '#ECFDF5';
+            border = '#A7F3D0';
+            textColor = '#059669';
           } else if (day.completed === false) {
-            bg = 'var(--danger-dim)';
-            border = 'var(--danger)';
+            bg = '#FEF2F2';
+            border = '#FECACA';
+            textColor = '#DC2626';
           }
 
-          if (isToday) {
-            border = 'var(--amber)';
+          if (isToday && day.completed === null) {
+            border = '#F59E0B';
+            textColor = '#D97706';
           }
 
           const typeInitial = isRest ? 'R' : day.dayType[0];
-          const textColor =
-            day.completed === true
-              ? 'var(--lime)'
-              : day.completed === false
-              ? 'var(--danger)'
-              : isRest
-              ? 'var(--text-dim)'
-              : isToday
-              ? 'var(--amber)'
-              : 'var(--text-muted)';
 
           return (
             <div
@@ -56,28 +60,29 @@ export default function StreakGrid({ days }: StreakGridProps) {
               style={{
                 flex: 1,
                 aspectRatio: '1',
-                borderRadius: '4px',
+                borderRadius: '8px',
                 background: bg,
                 border: `1px solid ${border}`,
-                boxShadow: glow,
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '2px',
                 position: 'relative',
+                boxShadow: isToday ? '0 0 0 2px rgba(245, 158, 11, 0.2)' : 'none',
+                transition: 'all 0.15s ease',
               }}
             >
               {isToday && (
                 <div
                   style={{
                     position: 'absolute',
-                    top: '3px',
-                    right: '3px',
-                    width: '4px',
-                    height: '4px',
+                    top: '4px',
+                    right: '4px',
+                    width: '5px',
+                    height: '5px',
                     borderRadius: '50%',
-                    background: 'var(--amber)',
+                    background: '#D97706',
                   }}
                   className="pulse-dot"
                 />
@@ -86,7 +91,7 @@ export default function StreakGrid({ days }: StreakGridProps) {
                 style={{
                   fontFamily: 'var(--font-display)',
                   fontSize: '13px',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   color: textColor,
                   lineHeight: 1,
                 }}
@@ -95,8 +100,8 @@ export default function StreakGrid({ days }: StreakGridProps) {
               </span>
               <span
                 style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '9px',
+                  fontSize: '10px',
+                  fontWeight: 600,
                   color: 'var(--text-dim)',
                   lineHeight: 1,
                 }}

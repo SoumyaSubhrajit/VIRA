@@ -221,7 +221,14 @@ export default function SchedulerPage() {
       }
       const agendaResponse = await fetch(`/api/google/agenda?date=${encodeURIComponent(date)}`, { cache: 'no-store' });
       const agendaBody = await agendaResponse.json();
-      if (!agendaResponse.ok) throw new Error(agendaBody.error ?? 'Failed to load Google agenda.');
+      if (!agendaResponse.ok) {
+        if (agendaResponse.status === 401 || agendaBody.expired || agendaBody.error?.includes('invalid_grant')) {
+          setGoogleStatus((current) => (current ? { ...current, connected: false } : null));
+          setGoogleAgenda(null);
+          return;
+        }
+        throw new Error(agendaBody.error ?? 'Failed to load Google agenda.');
+      }
       setGoogleAgenda(agendaBody as GoogleAgendaSnapshot);
     } catch (googleError) {
       console.error('[scheduler/google]', googleError);

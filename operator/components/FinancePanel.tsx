@@ -25,19 +25,21 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return (
     <div
       style={{
-        background: 'var(--bg-panel)',
+        background: '#FFFFFF',
         border: '1px solid var(--border-default)',
-        borderRadius: '4px',
+        borderRadius: '8px',
         padding: '8px 12px',
-        fontFamily: 'var(--font-mono)',
+        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.06)',
         fontSize: '12px',
         color: 'var(--text-primary)',
       }}
     >
-      <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
-      <div>Spent: <span style={{ color: 'var(--lime)' }}>₹{payload[0]?.value?.toLocaleString('en-IN')}</span></div>
+      <div style={{ fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
+      <div>Spent: <strong style={{ color: 'var(--lime)' }}>₹{payload[0]?.value?.toLocaleString('en-IN')}</strong></div>
       {payload[1] && (
-        <div>Budget: <span style={{ color: 'var(--text-muted)' }}>₹{payload[1]?.value?.toLocaleString('en-IN')}</span></div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
+          Budget: ₹{payload[1]?.value?.toLocaleString('en-IN')}
+        </div>
       )}
     </div>
   );
@@ -69,11 +71,11 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
       event.target.value = '';
     }
   }
+
   if (loading || !data) {
     return (
-      <div className="panel fade-in" style={{ minHeight: '260px' }}>
-        <span className="label">Finance</span>
-        <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+      <div className="panel fade-in" style={{ minHeight: '280px', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
           Loading finance data...
         </div>
       </div>
@@ -91,37 +93,30 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
         <span className="label">Finance</span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {data.isMock && <span className="mock-badge">mock data</span>}
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
             {data.month}
           </span>
-          <Link href="/finance" style={{ color: 'var(--lime)', textDecoration: 'none', fontFamily: 'var(--font-display)', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase' }}>
-            View details →
+          <Link
+            href="/finance"
+            style={{
+              color: 'var(--lime)',
+              textDecoration: 'none',
+              fontFamily: 'var(--font-display)',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Manage →
           </Link>
         </div>
       </div>
 
-      {!data.isMock && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-          {data.transactionCount ?? 0} imported transactions · last inbox scan {data.lastImportAt ? new Date(data.lastImportAt).toLocaleString('en-IN') : 'pending'}
-        </div>
-      )}
-
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '10px', display: 'grid', gap: '8px' }}>
-        <span className="label">Statement intake</span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-          Email any PDF statement to <strong style={{ color: 'var(--lime)' }}>soumyasubhrajit+vira@gmail.com</strong>, or upload it here. The subject can be anything.
-        </span>
-        <label className="btn" style={{ width: 'fit-content' }}>
-          {importing ? 'IMPORTING...' : 'UPLOAD PDF STATEMENT'}
-          <input type="file" accept="application/pdf,.pdf" disabled={importing} onChange={uploadStatement} style={{ display: 'none' }} />
-        </label>
-        {importFeedback && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--amber)' }}>{importFeedback}</span>}
-      </div>
-
       {/* Key stats */}
-      <div style={{ display: 'flex', gap: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
         <StatCard
-          label="Spent"
+          label="Total Spent"
           value={`₹${(data.totalSpent / 1000).toFixed(1)}k`}
           unit={`/ ₹${(data.totalBudget / 1000).toFixed(0)}k`}
           accent={spentColor as any}
@@ -129,65 +124,98 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
         <StatCard
           label="Savings Rate"
           value={`${Math.round(data.savingsRate * 100)}%`}
+          unit="of income"
           accent={data.savingsRate >= 0.2 ? 'lime' : 'amber'}
         />
       </div>
 
       {/* Overall spend bar */}
       <ProgressBar
-        label="Monthly Budget"
+        label="Monthly Budget Used"
         value={data.totalSpent}
         max={data.totalBudget}
         unit="₹"
         color={spentColor as any}
       />
 
+      {/* Statement intake */}
+      <div
+        style={{
+          border: '1px solid var(--border-default)',
+          borderRadius: '8px',
+          padding: '12px 14px',
+          background: 'var(--bg-base)',
+          display: 'grid',
+          gap: '8px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            Statement Intake
+          </span>
+          <label className="btn" style={{ fontSize: '11px', padding: '0.25rem 0.65rem' }}>
+            {importing ? 'Importing...' : 'Upload PDF'}
+            <input type="file" accept="application/pdf,.pdf" disabled={importing} onChange={uploadStatement} style={{ display: 'none' }} />
+          </label>
+        </div>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          Upload bank/UPI statement PDF or email to <strong style={{ color: 'var(--text-primary)' }}>soumyasubhrajit+vira@gmail.com</strong>.
+        </span>
+        {importFeedback && (
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--amber)' }}>
+            {importFeedback}
+          </span>
+        )}
+      </div>
+
       <div className="divider" />
 
       {/* Category breakdown chart */}
       <div>
-        <span className="label" style={{ marginBottom: '10px', display: 'flex' }}>
-          Categories
-        </span>
-        <div style={{ height: '110px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            Spending by Category
+          </span>
+          {overBudgetCats.length > 0 && (
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--danger)' }}>
+              Over: {overBudgetCats.map((c) => c.name).join(', ')}
+            </span>
+          )}
+        </div>
+
+        <div style={{ height: '120px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data.categories}
-              barSize={10}
-              barGap={3}
-              margin={{ top: 0, right: 0, left: -28, bottom: 0 }}
+              barSize={12}
+              barGap={4}
+              margin={{ top: 4, right: 0, left: -24, bottom: 0 }}
             >
               <XAxis
                 dataKey="name"
-                tick={{ fontFamily: 'var(--font-mono)', fontSize: 10, fill: 'var(--text-muted)' }}
+                tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
-                tick={{ fontFamily: 'var(--font-mono)', fontSize: 10, fill: 'var(--text-dim)' }}
+                tick={{ fontSize: 10, fill: 'var(--text-dim)' }}
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
               />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-              <Bar dataKey="spent" radius={[2, 2, 0, 0]}>
-                {data.categories.map((cat, i) => (
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+              <Bar dataKey="spent" radius={[3, 3, 0, 0]}>
+                {data.categories.map((cat) => (
                   <Cell
                     key={cat.name}
                     fill={cat.spent > cat.budget ? 'var(--danger)' : 'var(--lime)'}
-                    fillOpacity={0.85}
                   />
                 ))}
               </Bar>
-              <Bar dataKey="budget" radius={[2, 2, 0, 0]} fill="var(--border-default)" fillOpacity={0.6} />
+              <Bar dataKey="budget" radius={[3, 3, 0, 0]} fill="#E2E8F0" />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        {overBudgetCats.length > 0 && (
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--danger)', marginTop: '6px' }}>
-            ↑ Over budget: {overBudgetCats.map((c) => c.name).join(', ')}
-          </p>
-        )}
       </div>
     </div>
   );

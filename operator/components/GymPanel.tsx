@@ -13,9 +13,8 @@ interface GymPanelProps {
 export default function GymPanel({ data, loading, error }: GymPanelProps) {
   if (loading) {
     return (
-      <div className="panel fade-in" style={{ minHeight: '260px' }}>
-        <span className="label">Physical</span>
-        <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+      <div className="panel fade-in" style={{ minHeight: '280px', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
           Loading gym data...
         </div>
       </div>
@@ -24,60 +23,56 @@ export default function GymPanel({ data, loading, error }: GymPanelProps) {
 
   if (error || !data) {
     return (
-      <div className="panel fade-in" style={{ minHeight: '260px' }}>
-        <span className="label">Physical</span>
-        <div style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.6 }}>
-          <div style={{ marginBottom: '8px' }}>⚠ Could not load gym data</div>
-          <div style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{error}</div>
+      <div className="panel fade-in" style={{ minHeight: '280px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="label">Physical</span>
+          <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 600 }}>Sync issue</span>
+        </div>
+        <div style={{ padding: '12px', background: 'var(--danger-dim)', borderRadius: '8px', border: '1px solid #FECACA' }}>
+          <div style={{ color: 'var(--danger)', fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>⚠ Could not load gym data</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{error}</div>
         </div>
         <Link
           href="/gym"
-          style={{ fontFamily: 'var(--font-display)', fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--lime)', textDecoration: 'none', marginTop: 'auto' }}
+          className="btn"
+          style={{ marginTop: 'auto', alignSelf: 'flex-start' }}
         >
-          OPEN GYM PAGE →
+          Open Gym OS →
         </Link>
       </div>
     );
   }
 
   const { today, weekCompletion, weekTotal, currentStreak, last7Days } = data;
-  const dayTypeColor: Record<string, string> = {
-    Push: 'var(--lime)',
-    Pull: 'var(--amber)',
-    Legs: '#7ecfff',
-    Rest: 'var(--text-dim)',
-  };
 
   return (
     <div className="panel fade-in">
       {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
         <span className="label">Physical</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {today && (
-            <span
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: '11px',
-                fontWeight: 700,
-                letterSpacing: '2px',
-                textTransform: 'uppercase',
-                color: dayTypeColor[today.dayType] ?? 'var(--text-muted)',
-                padding: '2px 8px',
-                border: `1px solid ${dayTypeColor[today.dayType] ?? 'var(--border-default)'}`,
-                borderRadius: '3px',
-              }}
-            >
-              {today.dayType} Day
-            </span>
-          )}
-        </div>
+        {today && (
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              color: today.dayType === 'Rest' ? 'var(--text-muted)' : 'var(--lime)',
+              background: today.dayType === 'Rest' ? 'var(--bg-inset)' : 'var(--lime-dim)',
+              padding: '3px 10px',
+              border: `1px solid ${today.dayType === 'Rest' ? 'var(--border-default)' : '#A7F3D0'}`,
+              borderRadius: '999px',
+            }}
+          >
+            {today.dayType} Day
+          </span>
+        )}
       </div>
 
       {/* Key stats */}
-      <div style={{ display: 'flex', gap: '2rem' }}>
-        <StatCard label="Week" value={`${weekCompletion}/${weekTotal}`} unit="sessions" accent="lime" />
-        <StatCard label="Streak" value={currentStreak} unit="days" accent={currentStreak >= 3 ? 'lime' : 'muted'} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+        <StatCard label="Week Sessions" value={`${weekCompletion}/${weekTotal}`} unit="completed" accent="lime" />
+        <StatCard label="Current Streak" value={currentStreak} unit="days" accent={currentStreak >= 3 ? 'lime' : 'muted'} />
       </div>
 
       <div className="divider" />
@@ -85,30 +80,65 @@ export default function GymPanel({ data, loading, error }: GymPanelProps) {
       {/* Today's exercises */}
       {today ? (
         <div>
-          <span className="label" style={{ marginBottom: '8px', display: 'flex' }}>
-            Today — {today.dayType === 'Rest' ? 'Recovery' : today.muscleFocus}
-          </span>
+          <div
+            style={{
+              fontSize: '12px',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>Today</span>
+            <span style={{ color: 'var(--text-dim)' }}>—</span>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+              {today.dayType === 'Rest' ? 'Recovery & Mobility' : today.muscleFocus}
+            </span>
+          </div>
+
           {today.dayType === 'Rest' ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>
-              Rest day. Mobility, sleep, magnesium.
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic', margin: 0 }}>
+              Rest day. Hydration, mobility, magnesium, and active recovery.
             </p>
           ) : (
-            <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: 0 }}>
-              {today.exercises.map((ex, i) => (
+            <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: 0 }}>
+              {today.exercises.slice(0, 5).map((ex, i) => (
                 <li
                   key={i}
-                  style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', gap: '8px', alignItems: 'flex-start' }}
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--text-primary)',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: '8px',
+                  }}
                 >
-                  <span style={{ color: 'var(--text-dim)', minWidth: '16px' }}>{i + 1}.</span>
-                  <span>{ex.replace(/^\d+\.\s*/, '')}</span>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      minWidth: '18px',
+                    }}
+                  >
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span style={{ color: 'var(--text-primary)' }}>{ex.replace(/^\d+\.\s*/, '')}</span>
                 </li>
               ))}
+              {today.exercises.length > 5 && (
+                <li style={{ fontSize: '11px', color: 'var(--text-muted)', paddingLeft: '26px' }}>
+                  +{today.exercises.length - 5} more exercises in full routine
+                </li>
+              )}
             </ol>
           )}
         </div>
       ) : (
-        <p style={{ color: 'var(--text-dim)', fontSize: '13px' }}>
-          No training entry found for today.
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+          No workout scheduled for today.
         </p>
       )}
 
@@ -121,20 +151,20 @@ export default function GymPanel({ data, loading, error }: GymPanelProps) {
       <Link
         href="/gym"
         style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
           fontFamily: 'var(--font-display)',
-          fontSize: '11px',
-          fontWeight: 600,
-          letterSpacing: '1.5px',
+          fontSize: '12px',
+          fontWeight: 700,
+          letterSpacing: '0.04em',
           textTransform: 'uppercase',
-          color: 'var(--text-muted)',
+          color: 'var(--lime)',
           textDecoration: 'none',
-          marginTop: '4px',
-          transition: 'color 0.15s',
+          marginTop: '0.25rem',
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--lime)')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
       >
-        VIEW 6-MONTH CALENDAR →
+        View Complete Gym OS →
       </Link>
     </div>
   );

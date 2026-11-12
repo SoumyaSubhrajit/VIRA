@@ -256,7 +256,7 @@ function GymReminderPanel({ snapshot, busy, submit }: { snapshot: GymOsSnapshot;
 
 export default function GymOS() {
   const [date, setDate] = useState(todayLocal());
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const observedToday = useRef(todayLocal());
   const [snapshot, setSnapshot] = useState<GymOsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);

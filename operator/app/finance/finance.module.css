@@ -1,5 +1,5 @@
 .page { min-height: 100vh; background: var(--bg-base); color: var(--text-primary); }
-.topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 28px; border-bottom: 1px solid var(--border-default); background: rgba(11,13,10,.94); backdrop-filter: blur(12px); }
+.topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 28px; border-bottom: 1px solid var(--border-default); background: rgba(255,255,255,.92); backdrop-filter: blur(12px); }
 .brand { display: flex; align-items: center; gap: 22px; }
 .brand > a { color: var(--text-muted); text-decoration: none; font: 600 11px var(--font-display); letter-spacing: 1.5px; text-transform: uppercase; }
 .brand > a:hover { color: var(--lime); }
@@ -54,8 +54,8 @@
 .controlForm input,.controlForm select,.controlForm textarea { padding:12px; background:var(--bg-inset); color:var(--text-primary); border:1px solid var(--border-default); border-radius:5px; font:inherit; }
 .controlForm input[type=checkbox] { align-self:flex-start; width:20px; height:20px; }
 .report { white-space:pre-wrap; line-height:1.8; margin-top:20px; }
-.modalBackdrop { position:fixed; inset:0; background:#000b; z-index:100; display:grid; place-items:center; padding:20px; }
-.editDialog { background:#14180e; border:1px solid var(--lime); padding:28px; width:min(700px,100%); max-height:90vh; overflow:auto; }
+.modalBackdrop { position:fixed; inset:0; background:rgba(15, 23, 42, 0.45); backdrop-filter:blur(4px); z-index:100; display:grid; place-items:center; padding:20px; }
+.editDialog { background:var(--bg-panel); border:1px solid var(--border-default); border-radius:12px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); padding:28px; width:min(700px,100%); max-height:90vh; overflow:auto; }
 .editDialog .controlForm { flex-direction:column; align-items:stretch; }
 .editDialog .controlForm label { flex:auto; }
 .content > *, .hero > *, .panel, .ledgerPanel, .controlForm label { min-width:0; }

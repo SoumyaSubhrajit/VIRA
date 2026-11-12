@@ -28,21 +28,47 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
 
   return (
     <form onSubmit={submit} style={{ display: 'grid', gap: 16 }}>
-      <label style={{ display: 'grid', gap: 7, color: '#aeb7a8', fontSize: 13 }}>
-        Owner password
+      <label style={{ display: 'grid', gap: 7, color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>
+        Owner Password
         <input
           autoFocus
           autoComplete="current-password"
           type="password"
           required
+          placeholder="Enter access key..."
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          style={{ background: '#0c100b', border: '1px solid #36402f', borderRadius: 8, color: '#f4f6ee', fontSize: 16, padding: '13px 14px' }}
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid var(--border-default)',
+            borderRadius: 8,
+            color: 'var(--text-primary)',
+            fontSize: 15,
+            padding: '11px 14px',
+            outline: 'none',
+            transition: 'border-color 0.15s ease',
+          }}
+          onFocus={(e) => (e.target.style.borderColor = 'var(--lime)')}
+          onBlur={(e) => (e.target.style.borderColor = 'var(--border-default)')}
         />
       </label>
-      {error ? <p role="alert" style={{ color: '#ff9b84', fontSize: 13, margin: 0 }}>{error}</p> : null}
-      <button disabled={busy} style={{ background: '#b5dc42', border: 0, borderRadius: 8, color: '#10140c', cursor: 'pointer', fontWeight: 900, letterSpacing: 1.5, padding: 14 }}>
-        {busy ? 'SIGNING IN…' : 'ENTER VIRA'}
+      {error ? <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: 0, fontWeight: 500 }}>{error}</p> : null}
+      <button
+        disabled={busy}
+        style={{
+          background: 'var(--lime)',
+          border: 0,
+          borderRadius: 8,
+          color: '#FFFFFF',
+          cursor: 'pointer',
+          fontWeight: 700,
+          fontSize: 13,
+          letterSpacing: '0.04em',
+          padding: '12px 16px',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        {busy ? 'AUTHENTICATING…' : 'SIGN IN →'}
       </button>
     </form>
   );

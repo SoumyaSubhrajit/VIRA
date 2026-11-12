@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Operator — Personal Mission Control',
   description:
-    'Personal dashboard monitoring Gym, Finance, and Career with an AI Guide that surfaces what matters.',
+    'Modern personal command center monitoring Gym OS, Finance Ledger, and Career Execution.',
 };
 
 export default function RootLayout({
@@ -14,6 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
       <body>{children}</body>
     </html>
   );

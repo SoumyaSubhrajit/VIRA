@@ -17,16 +17,11 @@ export default function ProgressBar({
   showPercent = true,
   className = '',
 }: ProgressBarProps) {
-  const pct = Math.min(100, Math.round((value / max) * 100));
+  const pct = Math.min(100, Math.max(0, Math.round((value / max) * 100)));
   const barColor = {
-    lime:   'var(--lime)',
-    amber:  'var(--amber)',
-    danger: 'var(--danger)',
-  }[color];
-  const bgColor = {
-    lime:   'var(--lime-dim)',
-    amber:  'var(--amber-dim)',
-    danger: 'var(--danger-dim)',
+    lime:   '#059669',
+    amber:  '#D97706',
+    danger: '#DC2626',
   }[color];
 
   const fmt = (n: number) =>
@@ -42,9 +37,9 @@ export default function ProgressBar({
         <span
           style={{
             fontFamily: 'var(--font-display)',
-            fontSize: '12px',
-            fontWeight: 600,
-            letterSpacing: '1px',
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.04em',
             textTransform: 'uppercase',
             color: 'var(--text-muted)',
           }}
@@ -53,22 +48,22 @@ export default function ProgressBar({
         </span>
         <span
           style={{
-            fontFamily: 'var(--font-mono)',
             fontSize: '12px',
+            fontWeight: 500,
             color: 'var(--text-muted)',
           }}
         >
-          {fmt(value)} / {fmt(max)}
+          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{fmt(value)}</span> / {fmt(max)}
           {showPercent && (
-            <span style={{ color: barColor, marginLeft: '6px' }}>{pct}%</span>
+            <span style={{ color: barColor, fontWeight: 700, marginLeft: '6px' }}>{pct}%</span>
           )}
         </span>
       </div>
       <div
         style={{
-          height: '4px',
-          background: 'var(--border-subtle)',
-          borderRadius: '2px',
+          height: '6px',
+          background: '#E2E8F0',
+          borderRadius: '999px',
           overflow: 'hidden',
         }}
       >
@@ -77,9 +72,8 @@ export default function ProgressBar({
             height: '100%',
             width: `${pct}%`,
             background: barColor,
-            borderRadius: '2px',
-            boxShadow: `0 0 6px ${bgColor}`,
-            transition: 'width 0.6s ease',
+            borderRadius: '999px',
+            transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         />
       </div>

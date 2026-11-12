@@ -13,7 +13,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 14px 24px;
-  background: rgba(20, 23, 15, 0.96);
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--border-default);
   backdrop-filter: blur(12px);
 }

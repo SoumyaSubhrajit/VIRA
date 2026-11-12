@@ -64,73 +64,207 @@ export default function DashboardShell() {
   };
 
   const todayStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
+    weekday: 'short',
+    month: 'short',
     day: 'numeric',
   });
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }}>
+      {/* Top Navigation Bar */}
+      <header
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 40,
+          background: 'rgba(255, 255, 255, 0.88)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid var(--border-default)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '1440px',
+            margin: '0 auto',
+            padding: '0.85rem 1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+          }}
+        >
+          {/* Brand & Nav Pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+            <Link
+              href="/"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                textDecoration: 'none',
+              }}
+            >
+              <div
+                style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '3px',
+                  background: 'var(--lime)',
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: '18px',
+                  fontWeight: 800,
+                  letterSpacing: '0.08em',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                OPERATOR
+              </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  letterSpacing: '0.06em',
+                  color: 'var(--text-muted)',
+                  background: 'var(--bg-inset)',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-default)',
+                }}
+              >
+                VIRA
+              </span>
+            </Link>
 
-      {/* Top Bar */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-default)', paddingBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '1.5rem' }}>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 700, letterSpacing: '4px', margin: 0, color: 'var(--lime)' }}>
-            OPERATOR
-          </h1>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            {todayStr}
-          </span>
-        </div>
+            {/* Navigation links */}
+            <nav style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Link
+                href="/"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  background: 'var(--bg-panel-hover)',
+                  textDecoration: 'none',
+                }}
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/gym"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Gym OS
+              </Link>
+              <Link
+                href="/scheduler"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Daily Command
+              </Link>
+              <Link
+                href="/finance"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Finance
+              </Link>
+            </nav>
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <Link
-            href="/scheduler"
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: '11px',
-              fontWeight: 600,
-              letterSpacing: '1.5px',
-              textTransform: 'uppercase',
-              color: 'var(--lime)',
-              textDecoration: 'none',
-            }}
-          >
-            Daily Command →
-          </Link>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-dim)' }}>
-            LAST SYNC: {lastSynced ? lastSynced.toLocaleTimeString('en-US', { hour12: false }) : '--:--:--'}
-          </span>
-          <button
-            className="btn"
-            onClick={handleRefresh}
-            disabled={loadingInitial || refreshing}
-            style={{ width: '120px', justifyContent: 'center' }}
-          >
-            {refreshing ? 'SYNCING...' : 'REFRESH'}
-          </button>
+          {/* Right Status Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '12px',
+                color: 'var(--text-muted)',
+                background: '#FFFFFF',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-default)',
+              }}
+            >
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{todayStr}</span>
+              <span style={{ color: 'var(--border-default)' }}>|</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                {lastSynced ? `Synced ${lastSynced.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : 'Syncing...'}
+              </span>
+            </div>
+
+            <button
+              className="btn"
+              onClick={handleRefresh}
+              disabled={loadingInitial || refreshing}
+              style={{ height: '34px', padding: '0 14px' }}
+            >
+              {refreshing ? 'Syncing...' : 'Sync Now'}
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Grid */}
-      <div
+      {/* Main Workspace */}
+      <main
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
-          gap: '1.5rem',
-          flex: 1,
+          maxWidth: '1440px',
+          margin: '0 auto',
+          padding: '2rem 1.5rem 3rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.75rem',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <GymPanel data={gym} loading={loadingInitial} error={gymError} />
-          <CareerPanel data={career} loading={loadingInitial} />
-        </div>
+        {/* Main Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+            gap: '1.5rem',
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <GymPanel data={gym} loading={loadingInitial} error={gymError} />
+            <CareerPanel data={career} loading={loadingInitial} />
+          </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <FinancePanel data={finance} loading={loadingInitial} onRefresh={fetchData} />
-          <GuidePanel entries={memory} loading={refreshing} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <FinancePanel data={finance} loading={loadingInitial} onRefresh={fetchData} />
+            <GuidePanel entries={memory} loading={refreshing} />
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleAgenda } from '@/lib/google/sync';
+import { deleteGoogleConnection } from '@/lib/google/db';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(await getGoogleAgenda(date));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load Google agenda.';
+    const isInvalidGrant = message.includes('invalid_grant');
+    if (isInvalidGrant) {
+      console.warn('[api/google/agenda GET] Stored Google refresh token expired or revoked (invalid_grant). Cleaning up connection.');
+      await deleteGoogleConnection().catch(() => undefined);
+      return NextResponse.json(
+        { error: 'Google session has expired. Please reconnect your account.', expired: true },
+        { status: 401 }
+      );
+    }
     const status = message.includes('not connected') ? 409 : 502;
     console.error('[api/google/agenda GET]', { message });
     return NextResponse.json({ error: message }, { status });
