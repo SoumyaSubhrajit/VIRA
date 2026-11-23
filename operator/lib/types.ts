@@ -38,6 +38,9 @@ export interface FinanceData {
   isMock: boolean;
   transactionCount?: number;
   lastImportAt?: string | null;
+  liquidBalance?: number;
+  netWorth?: number;
+  source?: 'fold' | 'local' | 'mock';
 }
 
 // ─── Career ──────────────────────────────────────────────────────────────────

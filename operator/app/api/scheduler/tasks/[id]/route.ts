@@ -6,7 +6,11 @@ import { drainNotionOutbox, enqueueTaskArchive, enqueueTaskSync } from '@/lib/no
 
 export const runtime = 'nodejs';
 
-export async function PATCH(request: NextRequest, context: RouteContext<'/api/scheduler/tasks/[id]'>) {
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const input = validateUpdateTask(await request.json());
@@ -25,7 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<'/api/sc
   }
 }
 
-export async function DELETE(_request: NextRequest, context: RouteContext<'/api/scheduler/tasks/[id]'>) {
+export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     await deleteTaskFromGoogle(id).catch((error) => {

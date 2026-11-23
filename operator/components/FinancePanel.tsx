@@ -47,7 +47,24 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function FinancePanel({ data, loading, onRefresh }: FinancePanelProps) {
   const [importing, setImporting] = useState(false);
+  const [syncingFold, setSyncingFold] = useState(false);
   const [importFeedback, setImportFeedback] = useState('');
+
+  async function syncFromFold() {
+    setSyncingFold(true);
+    setImportFeedback('Syncing live transactions from Fold...');
+    try {
+      const response = await fetch('/api/finance/fold', { method: 'POST', body: JSON.stringify({ limit: 100 }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Fold sync failed');
+      setImportFeedback(`Synced from Fold: ${body.importedCount} new, ${body.skippedCount} up to date.`);
+      await onRefresh?.();
+    } catch (error) {
+      setImportFeedback(error instanceof Error ? error.message : 'Fold sync failed');
+    } finally {
+      setSyncingFold(false);
+    }
+  }
 
   async function uploadStatement(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -83,14 +100,32 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
   }
 
   const overBudgetCats = data.categories.filter((c) => c.spent > c.budget);
-  const spentPct = Math.round((data.totalSpent / data.totalBudget) * 100);
+  const spentPct = data.totalBudget > 0 ? Math.round((data.totalSpent / data.totalBudget) * 100) : 0;
   const spentColor = spentPct > 90 ? 'danger' : spentPct > 75 ? 'amber' : 'lime';
 
   return (
     <div className="panel fade-in">
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span className="label">Finance</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="label">Finance</span>
+          {data.source === 'fold' && (
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                color: '#10B981',
+                background: 'rgba(16, 185, 129, 0.1)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}
+            >
+              ● Fold Live
+            </span>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {data.isMock && <span className="mock-badge">mock data</span>}
           <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
@@ -114,17 +149,25 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
       </div>
 
       {/* Key stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: typeof data.liquidBalance === 'number' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '1rem' }}>
         <StatCard
           label="Total Spent"
           value={`₹${(data.totalSpent / 1000).toFixed(1)}k`}
           unit={`/ ₹${(data.totalBudget / 1000).toFixed(0)}k`}
           accent={spentColor as any}
         />
+        {typeof data.liquidBalance === 'number' && (
+          <StatCard
+            label="Liquid Cash"
+            value={`₹${data.liquidBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+            unit="Bank"
+            accent="lime"
+          />
+        )}
         <StatCard
           label="Savings Rate"
           value={`${Math.round(data.savingsRate * 100)}%`}
-          unit="of income"
+          unit="target"
           accent={data.savingsRate >= 0.2 ? 'lime' : 'amber'}
         />
       </div>
@@ -138,7 +181,7 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
         color={spentColor as any}
       />
 
-      {/* Statement intake */}
+      {/* Statement intake & Fold sync bar */}
       <div
         style={{
           border: '1px solid var(--border-default)',
@@ -151,15 +194,26 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-            Statement Intake
+            Live Sync & Intake
           </span>
-          <label className="btn" style={{ fontSize: '11px', padding: '0.25rem 0.65rem' }}>
-            {importing ? 'Importing...' : 'Upload PDF'}
-            <input type="file" accept="application/pdf,.pdf" disabled={importing} onChange={uploadStatement} style={{ display: 'none' }} />
-          </label>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={syncingFold}
+              onClick={syncFromFold}
+              style={{ fontSize: '11px', padding: '0.25rem 0.65rem' }}
+            >
+              {syncingFold ? 'Syncing...' : '↻ Sync Fold'}
+            </button>
+            <label className="btn" style={{ fontSize: '11px', padding: '0.25rem 0.65rem' }}>
+              {importing ? 'Importing...' : 'Upload PDF'}
+              <input type="file" accept="application/pdf,.pdf" disabled={importing} onChange={uploadStatement} style={{ display: 'none' }} />
+            </label>
+          </div>
         </div>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          Upload bank/UPI statement PDF or email to <strong style={{ color: 'var(--text-primary)' }}>soumyasubhrajit+vira@gmail.com</strong>.
+          Fold MCP integration active. Click <strong>Sync Fold</strong> to refresh local transaction records.
         </span>
         {importFeedback && (
           <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--amber)' }}>

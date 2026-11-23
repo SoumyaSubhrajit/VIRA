@@ -87,24 +87,24 @@ export async function getExistingFinanceSourceIds(sourceIds: string[]): Promise<
   return existing;
 }
 
-export async function setFinanceImportState(error: string | null): Promise<void> {
+export async function setFinanceImportState(error: string | null, source = 'gmail', timestamp?: string): Promise<void> {
   await initialize();
-  const now = new Date().toISOString();
+  const now = timestamp || new Date().toISOString();
   await (await getSchedulerDb()).prepare(`
     INSERT INTO finance_import_state (source, last_import_at, last_error, updated_at)
-    VALUES ('gmail', ?, ?, ?)
+    VALUES (?, ?, ?, ?)
     ON CONFLICT(source) DO UPDATE SET
       last_import_at = CASE WHEN excluded.last_error IS NULL THEN excluded.updated_at ELSE finance_import_state.last_import_at END,
       last_error = excluded.last_error,
       updated_at = excluded.updated_at
-  `).run(error ? null : now, error, now);
+  `).run(source, error ? null : now, error, now);
 }
 
-export async function getFinanceImportState(): Promise<{ lastImportAt: string | null; lastError: string | null }> {
+export async function getFinanceImportState(source = 'gmail'): Promise<{ lastImportAt: string | null; lastError: string | null }> {
   await initialize();
   const row = await (await getSchedulerDb()).prepare(
-    "SELECT last_import_at AS lastImportAt, last_error AS lastError FROM finance_import_state WHERE source = 'gmail'"
-  ).get<{ lastImportAt: string | null; lastError: string | null }>();
+    "SELECT last_import_at AS lastImportAt, last_error AS lastError FROM finance_import_state WHERE source = ?"
+  ).get<{ lastImportAt: string | null; lastError: string | null }>(source);
   return row ?? { lastImportAt: null, lastError: null };
 }
 
