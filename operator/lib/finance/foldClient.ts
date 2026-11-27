@@ -99,12 +99,13 @@ export interface FoldNetWorth {
 }
 
 function getMcpAuthTokensPath(): string | null {
+  if (process.env.VERCEL) return null;
   const customConfigDir = process.env.MCP_REMOTE_CONFIG_DIR;
   const baseDir = customConfigDir || path.join(os.homedir(), '.mcp-auth', 'mcp-remote-v1');
-  if (!fs.existsSync(baseDir)) return null;
+  if (!fs.existsSync(/*turbopackIgnore: true*/ baseDir)) return null;
 
   try {
-    const files = fs.readdirSync(baseDir);
+    const files = fs.readdirSync(/*turbopackIgnore: true*/ baseDir);
     const tokenFile = files.find((file) => file.endsWith('_tokens.json'));
     return tokenFile ? path.join(baseDir, tokenFile) : null;
   } catch {
@@ -113,15 +114,16 @@ function getMcpAuthTokensPath(): string | null {
 }
 
 function getMcpAuthClientInfo(): { client_id: string; issuer?: string } | null {
+  if (process.env.VERCEL) return null;
   const customConfigDir = process.env.MCP_REMOTE_CONFIG_DIR;
   const baseDir = customConfigDir || path.join(os.homedir(), '.mcp-auth', 'mcp-remote-v1');
-  if (!fs.existsSync(baseDir)) return null;
+  if (!fs.existsSync(/*turbopackIgnore: true*/ baseDir)) return null;
 
   try {
-    const files = fs.readdirSync(baseDir);
+    const files = fs.readdirSync(/*turbopackIgnore: true*/ baseDir);
     const clientFile = files.find((file) => file.endsWith('_client_info.json'));
     if (!clientFile) return null;
-    const content = fs.readFileSync(path.join(baseDir, clientFile), 'utf-8');
+    const content = fs.readFileSync(/*turbopackIgnore: true*/ path.join(baseDir, clientFile), 'utf-8');
     return JSON.parse(content);
   } catch {
     return null;
@@ -216,7 +218,7 @@ async function refreshFoldTokenWithLock(force = false): Promise<string | null> {
     if (!tokenFilePath) return null;
 
     try {
-      const content = fs.readFileSync(tokenFilePath, 'utf-8');
+      const content = fs.readFileSync(/*turbopackIgnore: true*/ tokenFilePath, 'utf-8');
       const tokenData = JSON.parse(content) as FoldTokenData;
       if (!tokenData.refresh_token) return null;
 
@@ -274,7 +276,7 @@ export async function getFoldAccessToken(): Promise<string | null> {
   if (!tokenFilePath) return null;
 
   try {
-    const content = fs.readFileSync(tokenFilePath, 'utf-8');
+    const content = fs.readFileSync(/*turbopackIgnore: true*/ tokenFilePath, 'utf-8');
     const tokenData = JSON.parse(content) as FoldTokenData;
 
     const isExpired = tokenData.expires_at ? (Date.now() >= (tokenData.expires_at - 90_000)) : false;
