@@ -1,4 +1,5 @@
 import { getSchedulerDb } from '@/lib/scheduler/db';
+import { scrubSensitiveFinanceText } from '@/lib/security/crypto';
 import type { FoldTransaction } from './foldClient';
 
 export const ALLOWED_CATEGORIES = [
@@ -92,8 +93,8 @@ export async function classifyUntaggedFoldTransactions(
   const batch = pending.slice(0, 60);
   const items = batch.map((tx) => ({
     id: tx.id,
-    merchant: tx.merchant_name || '',
-    narration: (tx.narration || '').slice(0, 120),
+    merchant: scrubSensitiveFinanceText(tx.merchant_name || ''),
+    narration: scrubSensitiveFinanceText(tx.narration || ''),
     amount: Math.round(tx.effective_amount || tx.amount),
   }));
 

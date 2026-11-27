@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ArrowLeft, Calendar, Palette, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Calendar, Eye, EyeOff, Palette, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -83,7 +83,7 @@ interface FinanceReportData {
   };
 }
 
-const formatInr = (amount: number) =>
+const rawInr = (amount: number) =>
   new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
@@ -100,12 +100,42 @@ export default function FinancePage() {
   const [syncNote, setSyncNote] = useState('');
   const [showAllDays, setShowAllDays] = useState(false);
   const [theme, setTheme] = useState<UiTheme>('light');
+  const [stealth, setStealth] = useState(false);
 
   useEffect(() => {
     const saved = getSavedUiTheme();
     setTheme(saved);
     applyUiTheme(saved);
+    if (typeof window !== 'undefined') {
+      setStealth(window.localStorage.getItem('vira-finance-stealth') === '1');
+    }
   }, []);
+
+  const formatInr = (amount: number) => (stealth ? '₹••••' : rawInr(amount));
+
+  function toggleStealth() {
+    setStealth((prev) => {
+      const next = !prev;
+      window.localStorage.setItem('vira-finance-stealth', next ? '1' : '0');
+      return next;
+    });
+  }
+
+  async function handleDisconnectFold() {
+    if (!window.confirm('Disconnect Fold and revoke stored access tokens?')) return;
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/finance/fold/disconnect', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Disconnect failed');
+      setSyncNote(json.message);
+      await loadReport(selectedMonth || undefined, selectedYear);
+    } catch (err) {
+      setSyncNote(err instanceof Error ? err.message : 'Disconnect failed');
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const loadReport = useCallback(async (monthParam?: string, yearParam?: number) => {
     setLoading(true);
@@ -182,6 +212,12 @@ export default function FinancePage() {
             <span className="text-border">/</span>
             <h1 className="text-sm font-semibold tracking-tight">Finance</h1>
             {data?.source === 'fold' && <Badge variant="success">● Fold Live</Badge>}
+            {data?.foldConnected && (
+              <Badge variant="muted" title="Fold OAuth tokens & cache encrypted with AES-256-GCM">
+                <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                Encrypted
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -193,10 +229,19 @@ export default function FinancePage() {
                 Connect Fold
               </a>
             )}
+            <Button onClick={toggleStealth} variant="outline" size="sm" title={stealth ? 'Show amounts' : 'Hide sensitive amounts'}>
+              {stealth ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              {stealth ? 'Show ₹' : 'Hide ₹'}
+            </Button>
             <Button onClick={handleSyncFold} disabled={syncing} variant="outline" size="sm">
               <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? 'Syncing' : 'Sync'}
             </Button>
+            {data?.foldConnected && (
+              <Button onClick={handleDisconnectFold} disabled={syncing} variant="ghost" size="sm" title="Disconnect Fold & revoke tokens">
+                <Unplug className="h-3.5 w-3.5 text-red-500" />
+              </Button>
+            )}
 
             {/* Configurable Theme Switcher */}
             <div className="relative flex items-center">
@@ -470,7 +515,7 @@ export default function FinancePage() {
                         tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
-                        tickFormatter={(v) => `₹${Math.round(v / 1000)}k`}
+                        tickFormatter={(v) => (stealth ? '••' : `₹${Math.round(v / 1000)}k`)}
                       />
                       <Tooltip
                         contentStyle={{

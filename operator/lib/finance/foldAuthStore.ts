@@ -1,4 +1,9 @@
 import { getSchedulerDb } from '@/lib/scheduler/db';
+import {
+  decryptSensitiveText,
+  encryptSensitiveText,
+  isEncryptedEnvelope,
+} from '@/lib/security/crypto';
 
 const USER_ID = 'default-user';
 const DEFAULT_ISSUER = 'https://mcp.fold.money';
@@ -69,7 +74,37 @@ export async function getStoredFoldTokens(): Promise<StoredFoldTokens | null> {
     FROM fold_oauth_tokens
     WHERE user_id = ?
   `).get<StoredFoldTokens>(USER_ID);
-  return row ?? null;
+  if (!row) return null;
+
+  try {
+    const wasPlainAccess = !isEncryptedEnvelope(row.accessToken);
+    const wasPlainRefresh = Boolean(row.refreshToken && !isEncryptedEnvelope(row.refreshToken));
+
+    const accessToken = decryptSensitiveText(row.accessToken);
+    const refreshToken = row.refreshToken ? decryptSensitiveText(row.refreshToken) : null;
+
+    // Auto-upgrade any legacy plaintext token row to AES-256-GCM ciphertext at rest
+    if (wasPlainAccess || wasPlainRefresh) {
+      await saveStoredFoldTokens({
+        clientId: row.clientId,
+        accessToken,
+        refreshToken,
+        tokenType: row.tokenType,
+        scope: row.scope,
+        issuer: row.issuer,
+        expiresAt: row.expiresAt,
+      });
+    }
+
+    return {
+      ...row,
+      accessToken,
+      refreshToken,
+    };
+  } catch (err) {
+    console.error('[foldAuthStore] Failed to decrypt stored Fold tokens:', err);
+    return null;
+  }
 }
 
 export async function saveStoredFoldTokens(input: {
@@ -84,6 +119,9 @@ export async function saveStoredFoldTokens(input: {
   await ensureTables();
   const db = await getSchedulerDb();
   const now = new Date().toISOString();
+  const encryptedAccess = encryptSensitiveText(input.accessToken);
+  const encryptedRefresh = input.refreshToken ? encryptSensitiveText(input.refreshToken) : null;
+
   await db.prepare(`
     INSERT INTO fold_oauth_tokens (
       user_id, client_id, access_token, refresh_token, token_type, scope, issuer, expires_at, updated_at
@@ -100,8 +138,8 @@ export async function saveStoredFoldTokens(input: {
   `).run(
     USER_ID,
     input.clientId,
-    input.accessToken,
-    input.refreshToken ?? null,
+    encryptedAccess,
+    encryptedRefresh,
     input.tokenType ?? 'Bearer',
     input.scope ?? null,
     input.issuer ?? DEFAULT_ISSUER,
@@ -125,13 +163,18 @@ export async function savePendingFoldAuth(input: {
   await ensureTables();
   const db = await getSchedulerDb();
   const now = new Date().toISOString();
-  // Clean up old pending auth records (> 30 mins old)
-  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   await db.prepare('DELETE FROM fold_oauth_pending WHERE created_at < ?').run(cutoff);
   await db.prepare(`
     INSERT OR REPLACE INTO fold_oauth_pending (state, client_id, code_verifier, redirect_uri, created_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run(input.state, input.clientId, input.codeVerifier, input.redirectUri, now);
+  `).run(
+    input.state,
+    input.clientId,
+    encryptSensitiveText(input.codeVerifier),
+    input.redirectUri,
+    now,
+  );
 }
 
 export async function consumePendingFoldAuth(state: string): Promise<PendingFoldAuth | null> {
@@ -142,10 +185,22 @@ export async function consumePendingFoldAuth(state: string): Promise<PendingFold
     FROM fold_oauth_pending
     WHERE state = ?
   `).get<PendingFoldAuth>(state);
-  if (row) {
-    await db.prepare('DELETE FROM fold_oauth_pending WHERE state = ?').run(state);
+  if (!row) return null;
+  await db.prepare('DELETE FROM fold_oauth_pending WHERE state = ?').run(state);
+
+  // Reject stale PKCE attempts older than 15 minutes
+  if (Date.now() - new Date(row.createdAt).getTime() > 15 * 60 * 1000) {
+    return null;
   }
-  return row ?? null;
+
+  try {
+    return {
+      ...row,
+      codeVerifier: decryptSensitiveText(row.codeVerifier),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getCachedFoldResponse<T>(cacheKey: string): Promise<{ data: T; isFresh: boolean } | null> {
@@ -158,8 +213,9 @@ export async function getCachedFoldResponse<T>(cacheKey: string): Promise<{ data
   `).get<{ payloadJson: string; expiresAt: number }>(cacheKey);
   if (!row) return null;
   try {
+    const jsonString = decryptSensitiveText(row.payloadJson);
     return {
-      data: JSON.parse(row.payloadJson) as T,
+      data: JSON.parse(jsonString) as T,
       isFresh: Date.now() < row.expiresAt,
     };
   } catch {
@@ -171,6 +227,7 @@ export async function setCachedFoldResponse(cacheKey: string, data: unknown, ttl
   await ensureTables();
   const db = await getSchedulerDb();
   const now = Date.now();
+  const encryptedPayload = encryptSensitiveText(JSON.stringify(data));
   await db.prepare(`
     INSERT INTO fold_response_cache (cache_key, payload_json, expires_at, updated_at)
     VALUES (?, ?, ?, ?)
@@ -178,7 +235,7 @@ export async function setCachedFoldResponse(cacheKey: string, data: unknown, ttl
       payload_json = excluded.payload_json,
       expires_at = excluded.expires_at,
       updated_at = excluded.updated_at
-  `).run(cacheKey, JSON.stringify(data), now + ttlMs, new Date(now).toISOString());
+  `).run(cacheKey, encryptedPayload, now + ttlMs, new Date(now).toISOString());
 }
 
 export async function clearFoldResponseCache(): Promise<void> {

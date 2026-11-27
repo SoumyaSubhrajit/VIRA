@@ -30,3 +30,5 @@ Thumbs.db
 # Local Android build tool cache and personal debug artifact
 .android-tools/
 /VIRA-Capture-debug.apk
+.vercel
+.env*

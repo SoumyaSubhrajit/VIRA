@@ -25,6 +25,8 @@
 /data/*.sqlite-shm
 /data/*.sqlite-wal
 /data/*.log
+/data/*.key
+/data/.vira-local.key
 /data/gym-photos/
 /data/agent_memory.json
 /public/VIRA-Capture-debug.apk

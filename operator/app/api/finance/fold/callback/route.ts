@@ -1,30 +1,49 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { consumePendingFoldAuth, saveStoredFoldTokens } from '@/lib/finance/foldAuthStore';
 import { setFinanceImportState } from '@/lib/finance/db';
+import { FOLD_STATE_COOKIE } from '../auth/route';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const FOLD_ISSUER = 'https://mcp.fold.money';
 
+function safeEqualHex(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const error = searchParams.get('error');
-  const errorDescription = searchParams.get('error_description');
   const code = searchParams.get('code');
   const state = searchParams.get('state');
 
+  const clearAndRedirect = (dest: string) => {
+    const res = NextResponse.redirect(dest);
+    res.cookies.delete(FOLD_STATE_COOKIE);
+    return res;
+  };
+
   if (error) {
-    return NextResponse.redirect(`${origin}/?fold_error=${encodeURIComponent(errorDescription || error)}`);
+    return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent('Fold authorization was declined or cancelled.')}`);
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(`${origin}/?fold_error=${encodeURIComponent('Missing authorization code or state.')}`);
+    return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent('Missing authorization code or state.')}`);
+  }
+
+  // Verify CSRF cookie matches OAuth state
+  const stateCookie = request.cookies.get(FOLD_STATE_COOKIE)?.value ?? '';
+  const expectedDigest = crypto.createHash('sha256').update(state).digest('hex');
+  if (!safeEqualHex(stateCookie, expectedDigest)) {
+    return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent('Security validation failed. Please click Connect Fold again.')}`);
   }
 
   const pending = await consumePendingFoldAuth(state);
   if (!pending) {
-    return NextResponse.redirect(`${origin}/?fold_error=${encodeURIComponent('Login session expired. Please click Connect Fold again.')}`);
+    return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent('Login session expired. Please click Connect Fold again.')}`);
   }
 
   try {
@@ -40,12 +59,12 @@ export async function GET(request: NextRequest) {
     const tokenRes = await fetch(`${FOLD_ISSUER}/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      signal: AbortSignal.timeout(15_000),
       body: body.toString(),
     });
 
     if (!tokenRes.ok) {
-      const text = await tokenRes.text();
-      return NextResponse.redirect(`${origin}/?fold_error=${encodeURIComponent(`Token exchange failed (${tokenRes.status}): ${text}`)}`);
+      return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent(`Fold token exchange failed (${tokenRes.status}). Please retry.`)}`);
     }
 
     const tokenData = (await tokenRes.json()) as {
@@ -68,10 +87,9 @@ export async function GET(request: NextRequest) {
 
     await setFinanceImportState(null, 'fold');
 
-    return NextResponse.redirect(`${origin}/?fold=connected`);
+    return clearAndRedirect(`${origin}/?fold=connected`);
   } catch (err) {
-    console.error('[api/finance/fold/callback GET]', err);
-    const msg = err instanceof Error ? err.message : 'Unexpected Fold callback error';
-    return NextResponse.redirect(`${origin}/?fold_error=${encodeURIComponent(msg)}`);
+    console.error('[api/finance/fold/callback GET]', err instanceof Error ? err.message : 'Callback error');
+    return clearAndRedirect(`${origin}/?fold_error=${encodeURIComponent('Fold connection failed. Please try again.')}`);
   }
 }
