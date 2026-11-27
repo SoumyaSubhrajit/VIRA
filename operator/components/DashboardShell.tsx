@@ -17,6 +17,11 @@ export default function DashboardShell() {
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [cmdText, setCmdText] = useState('');
+  const [cmdBusy, setCmdBusy] = useState(false);
+  const [cmdResult, setCmdResult] = useState<string | null>(null);
+  const [dueReminders, setDueReminders] = useState<Array<{ id: string; title: string; startTime: string }>>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>('default');
 
   const fetchData = async () => {
     const [gRes, fRes, cRes, mRes] = await Promise.all([
@@ -45,6 +50,104 @@ export default function DashboardShell() {
     fetchData().finally(() => setLoadingInitial(false));
   }, []);
 
+  // Poll scheduler every 20s for due in-app & browser notifications
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermission(Notification.permission);
+    } else {
+      setNotifPermission('unsupported');
+    }
+
+    const getDismissed = (): Set<string> => {
+      try {
+        return new Set(JSON.parse(window.localStorage.getItem('vira-dismissed-reminders') || '[]'));
+      } catch {
+        return new Set();
+      }
+    };
+
+    const getNotified = (): Set<string> => {
+      try {
+        return new Set(JSON.parse(window.localStorage.getItem('vira-browser-notified') || '[]'));
+      } catch {
+        return new Set();
+      }
+    };
+
+    const checkDue = async () => {
+      try {
+        const todayKey = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date());
+        const res = await fetch(`/api/scheduler?date=${todayKey}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          tasks?: Array<{
+            id: string;
+            title: string;
+            startTime: string;
+            scheduledAt: string;
+            status: string;
+            reminderMinutes: number;
+          }>;
+        };
+        const now = Date.now();
+        const dismissed = getDismissed();
+        const notified = getNotified();
+        const active = (json.tasks ?? []).filter((t) => {
+          if (t.status !== 'planned' || dismissed.has(t.id) || t.id.startsWith('gym-os:')) return false;
+          const sched = new Date(t.scheduledAt).getTime();
+          const trigger = sched - (t.reminderMinutes ?? 0) * 60_000;
+          return now >= trigger && now <= sched + 30 * 60_000;
+        });
+
+        setDueReminders(active.map((t) => ({ id: t.id, title: t.title, startTime: t.startTime })));
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+          let changed = false;
+          for (const t of active) {
+            if (!notified.has(t.id)) {
+              new Notification(`VIRA Reminder · ${t.startTime}`, { body: t.title });
+              notified.add(t.id);
+              changed = true;
+            }
+          }
+          if (changed) {
+            window.localStorage.setItem('vira-browser-notified', JSON.stringify([...notified].slice(-50)));
+          }
+        }
+      } catch {
+        // silent poll failure
+      }
+    };
+
+    void checkDue();
+    const timer = setInterval(() => void checkDue(), 20_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dismissReminder = (id: string) => {
+    try {
+      const prev = JSON.parse(window.localStorage.getItem('vira-dismissed-reminders') || '[]') as string[];
+      window.localStorage.setItem('vira-dismissed-reminders', JSON.stringify([...new Set([...prev, id])].slice(-100)));
+    } catch {
+      // ignore
+    }
+    setDueReminders((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const completeReminder = async (id: string) => {
+    dismissReminder(id);
+    await fetch(`/api/scheduler/tasks/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'completed' }),
+    }).catch(() => null);
+  };
+
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -60,6 +163,34 @@ export default function DashboardShell() {
       console.error('Refresh failed', err);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleCommand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = cmdText.trim();
+    if (!trimmed || cmdBusy) return;
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then((perm) => setNotifPermission(perm)).catch(() => null);
+    }
+    setCmdBusy(true);
+    setCmdResult(null);
+    try {
+      const res = await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: trimmed }),
+      });
+      const json = await res.json();
+      setCmdResult(json.message || json.error || 'Done');
+      if (json.ok && json.action !== 'answer') {
+        setCmdText('');
+        await fetchData();
+      }
+    } catch {
+      setCmdResult('Command failed. Try again.');
+    } finally {
+      setCmdBusy(false);
     }
   };
 
@@ -197,6 +328,34 @@ export default function DashboardShell() {
               >
                 Finance
               </Link>
+              <Link
+                href="/career"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Career
+              </Link>
+              <Link
+                href="/radar"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Tech Radar
+              </Link>
             </nav>
           </div>
 
@@ -245,6 +404,100 @@ export default function DashboardShell() {
           gap: '1.75rem',
         }}
       >
+        {/* Minimal One-Line AI Command Bar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <form
+            onSubmit={handleCommand}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: '#FFFFFF',
+              border: '1px solid var(--border-default)',
+              borderRadius: '10px',
+              padding: '6px 8px 6px 14px',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+            }}
+          >
+            <span style={{ color: 'var(--lime)', fontWeight: 700, fontSize: '13px' }}>✦</span>
+            <input
+              value={cmdText}
+              onChange={(e) => setCmdText(e.target.value)}
+              placeholder='Ask VIRA or run a command (e.g. "Remind me to pay WiFi bill tomorrow 10am", "Log weight 78.5kg", "How much did I spend on food?")'
+              style={{
+                flex: 1,
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                fontSize: '13px',
+                color: 'var(--text-primary)',
+              }}
+            />
+            <button
+              type="submit"
+              className="btn"
+              disabled={cmdBusy || !cmdText.trim()}
+              style={{ height: '30px', padding: '0 12px', fontSize: '12px' }}
+            >
+              {cmdBusy ? 'Running...' : 'Run'}
+            </button>
+          </form>
+          {cmdResult && (
+            <div style={{ fontSize: '12px', color: 'var(--lime)', fontWeight: 500, paddingLeft: '6px' }}>
+              {cmdResult}
+            </div>
+          )}
+          {notifPermission === 'default' && (
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', paddingLeft: '6px' }}>
+              Want popup desktop notifications for reminders?{' '}
+              <button
+                type="button"
+                onClick={() => Notification.requestPermission().then(setNotifPermission)}
+                style={{ color: 'var(--lime)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Enable browser alerts
+              </button>
+            </div>
+          )}
+          {dueReminders.map((rem) => (
+            <div
+              key={rem.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                background: 'var(--amber-dim)',
+                border: '1px solid var(--amber)',
+                borderRadius: '10px',
+                padding: '10px 14px',
+              }}
+            >
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                🔔 Reminder ({rem.startTime}): {rem.title}
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void completeReminder(rem.id)}
+                  style={{ fontSize: '11px', padding: '4px 10px', background: 'var(--lime)', color: '#fff', borderColor: 'var(--lime)' }}
+                >
+                  Done
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => dismissReminder(rem.id)}
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Main Grid */}
         <div
           style={{
@@ -256,7 +509,7 @@ export default function DashboardShell() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <GymPanel data={gym} loading={loadingInitial} error={gymError} />
-            <CareerPanel data={career} loading={loadingInitial} />
+            <CareerPanel data={career} loading={loadingInitial} onUpdate={setCareer} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>

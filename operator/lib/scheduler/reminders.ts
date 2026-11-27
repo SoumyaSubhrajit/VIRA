@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { sendWithConnectedGmail } from '@/lib/google/gmail';
+import { getGymReminderSettings } from '@/lib/gym/reminderStore';
 import {
   getDayPlan,
   getPendingReminderTasks,
@@ -159,7 +160,12 @@ async function deliverEmail(input: {
 
 export async function dispatchDueReminders(now = new Date()): Promise<ReminderDispatchResult> {
   const settings = await getSchedulerSettings();
-  if (!settings.emailEnabled || !settings.reminderEmail) {
+  let recipientEmail = settings.reminderEmail?.trim();
+  if (!recipientEmail) {
+    const gymSettings = await getGymReminderSettings().catch(() => null);
+    recipientEmail = gymSettings?.recipientEmail?.trim() || '';
+  }
+  if (!settings.emailEnabled || !recipientEmail) {
     return { sent: 0, failed: 0, skipped: 1, reason: 'Email reminders are disabled or no reminder email is configured.' };
   }
 
@@ -190,7 +196,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
         scheduleLabel: `Task reminder · ${task.reminderMinutes} minute${task.reminderMinutes === 1 ? '' : 's'} before start · ${settings.timezone}`,
       });
     const response = await deliverEmail({
-      to: settings.reminderEmail,
+      to: recipientEmail,
       subject,
       html,
       text: `VIRA MISSION BRIEF\n\nOBJECTIVE: ${task.title}\nTIME: ${timeLabel}\nMODE: ${personality.shortName} · P${task.priority}\n\n${directive}\n\n${task.details}`,
@@ -258,7 +264,7 @@ export async function dispatchDueReminders(now = new Date()): Promise<ReminderDi
         return `${mark} ${item.timeLabel} · ${item.modeLabel} · ${item.title}`;
       }).join('\n');
       const response = await deliverEmail({
-        to: settings.reminderEmail,
+        to: recipientEmail,
         subject,
         html,
         text: `VIRA HOURLY LOCKED-PLAN STATUS\n\nPROGRESS: ${progress.percent}% · ${progress.completed}/${progress.total} COMPLETE\n\n${timeline}\n\nCURRENT OBJECTIVE: ${objective}\nCHECKPOINT: ${formatTime12(checkInSlot.slotTime)}\nMODE: ${personality?.shortName ?? 'Builder'}\n\n${directive}\n\n1. What did you finish in the last hour?\n2. What exact result is next?\n3. Are you executing or avoiding?`,

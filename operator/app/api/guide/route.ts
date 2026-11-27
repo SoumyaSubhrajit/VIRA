@@ -30,6 +30,8 @@ export async function POST() {
         totalSpent: finance.totalSpent,
         totalBudget: finance.totalBudget,
         savingsRate: `${Math.round(finance.savingsRate * 100)}%`,
+        liquidBalance: finance.liquidBalance,
+        topCategories: finance.categories.slice(0, 6),
         isMock: finance.isMock,
       },
       career: {

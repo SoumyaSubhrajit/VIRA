@@ -1,6 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import {
+  clearFoldResponseCache,
+  clearStoredFoldTokens,
+  getCachedFoldResponse,
+  getStoredFoldTokens,
+  saveStoredFoldTokens,
+  setCachedFoldResponse,
+} from './foldAuthStore';
+
+export { clearFoldResponseCache };
 
 export interface FoldTokenData {
   access_token: string;
@@ -118,18 +128,22 @@ function getMcpAuthClientInfo(): { client_id: string; issuer?: string } | null {
   }
 }
 
-async function refreshFoldToken(tokenData: FoldTokenData, tokenFilePath: string): Promise<string | null> {
-  if (!tokenData.refresh_token) return null;
+let activeRefreshPromise: Promise<string | null> | null = null;
 
-  const clientInfo = getMcpAuthClientInfo();
-  const clientId = clientInfo?.client_id || 'mcp_E3E2lN1XqYDZ9OALX3DYTfYiAPzBpudgA3NZ3OlbeqY';
-  const tokenEndpoint = `${tokenData.issuer || 'https://mcp.fold.money'}/oauth/token`;
-
+async function doRefreshToken(params: {
+  refreshToken: string;
+  clientId: string;
+  issuer: string;
+  onSuccess: (refreshed: { access_token: string; expires_in: number; refresh_token?: string; token_type: string; scope?: string }) => Promise<void> | void;
+  onInvalidGrant?: () => Promise<void> | void;
+}): Promise<string | null> {
+  const tokenEndpoint = `${params.issuer || 'https://mcp.fold.money'}/oauth/token`;
   try {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: tokenData.refresh_token,
-      client_id: clientId,
+      refresh_token: params.refreshToken,
+      client_id: params.clientId,
+      resource: params.issuer || 'https://mcp.fold.money',
     });
 
     const res = await fetch(tokenEndpoint, {
@@ -139,7 +153,11 @@ async function refreshFoldToken(tokenData: FoldTokenData, tokenFilePath: string)
     });
 
     if (!res.ok) {
-      console.error('[FoldClient] Token refresh failed HTTP', res.status, await res.text());
+      const errText = await res.text();
+      console.error('[FoldClient] Token refresh failed HTTP', res.status, errText);
+      if (res.status === 400 && errText.includes('invalid_grant')) {
+        await params.onInvalidGrant?.();
+      }
       return null;
     }
 
@@ -151,19 +169,86 @@ async function refreshFoldToken(tokenData: FoldTokenData, tokenFilePath: string)
       scope?: string;
     };
 
-    const updatedData: FoldTokenData = {
-      ...tokenData,
-      access_token: refreshed.access_token,
-      refresh_token: refreshed.refresh_token || tokenData.refresh_token,
-      expires_in: refreshed.expires_in,
-      expires_at: Date.now() + (refreshed.expires_in * 1000),
-    };
-
-    fs.writeFileSync(tokenFilePath, JSON.stringify(updatedData, null, 2), 'utf-8');
-    return updatedData.access_token;
+    await params.onSuccess(refreshed);
+    return refreshed.access_token;
   } catch (err) {
     console.error('[FoldClient] Token refresh error:', err);
     return null;
+  }
+}
+
+async function refreshFoldTokenWithLock(force = false): Promise<string | null> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  activeRefreshPromise = (async () => {
+    // 1. Check VIRA's isolated SQLite token store first
+    const stored = await getStoredFoldTokens();
+    if (stored) {
+      const isStillValid = !force && stored.expiresAt > Date.now() + 90_000;
+      if (isStillValid) return stored.accessToken;
+      if (!stored.refreshToken) return null;
+
+      return await doRefreshToken({
+        refreshToken: stored.refreshToken,
+        clientId: stored.clientId,
+        issuer: stored.issuer,
+        onSuccess: async (refreshed) => {
+          await saveStoredFoldTokens({
+            clientId: stored.clientId,
+            accessToken: refreshed.access_token,
+            refreshToken: refreshed.refresh_token || stored.refreshToken,
+            tokenType: refreshed.token_type,
+            scope: refreshed.scope ?? stored.scope,
+            issuer: stored.issuer,
+            expiresAt: Date.now() + (refreshed.expires_in * 1000),
+          });
+        },
+        onInvalidGrant: async () => {
+          await clearStoredFoldTokens();
+        },
+      });
+    }
+
+    // 2. Fallback: legacy .mcp-auth file if present
+    const tokenFilePath = getMcpAuthTokensPath();
+    if (!tokenFilePath) return null;
+
+    try {
+      const content = fs.readFileSync(tokenFilePath, 'utf-8');
+      const tokenData = JSON.parse(content) as FoldTokenData;
+      if (!tokenData.refresh_token) return null;
+
+      const clientInfo = getMcpAuthClientInfo();
+      const clientId = clientInfo?.client_id || 'mcp_E3E2lN1XqYDZ9OALX3DYTfYiAPzBpudgA3NZ3OlbeqY';
+      const issuer = tokenData.issuer || 'https://mcp.fold.money';
+
+      return await doRefreshToken({
+        refreshToken: tokenData.refresh_token,
+        clientId,
+        issuer,
+        onSuccess: async (refreshed) => {
+          await saveStoredFoldTokens({
+            clientId,
+            accessToken: refreshed.access_token,
+            refreshToken: refreshed.refresh_token || tokenData.refresh_token,
+            tokenType: refreshed.token_type,
+            scope: refreshed.scope ?? tokenData.scope,
+            issuer,
+            expiresAt: Date.now() + (refreshed.expires_in * 1000),
+          });
+        },
+      });
+    } catch {
+      return null;
+    }
+  })();
+
+  try {
+    return await activeRefreshPromise;
+  } finally {
+    activeRefreshPromise = null;
   }
 }
 
@@ -173,7 +258,18 @@ export async function getFoldAccessToken(): Promise<string | null> {
     return process.env.FOLD_ACCESS_TOKEN;
   }
 
-  // 2. Read from authenticated .mcp-auth cache
+  // 2. Read from VIRA's isolated SQLite token store
+  const stored = await getStoredFoldTokens();
+  if (stored) {
+    const isExpired = Date.now() >= (stored.expiresAt - 90_000);
+    if (!isExpired) return stored.accessToken;
+    if (stored.refreshToken) {
+      return await refreshFoldTokenWithLock(false);
+    }
+    return null;
+  }
+
+  // 3. Fallback: Read from .mcp-auth cache if present (and import/refresh into SQLite if needed)
   const tokenFilePath = getMcpAuthTokensPath();
   if (!tokenFilePath) return null;
 
@@ -181,11 +277,9 @@ export async function getFoldAccessToken(): Promise<string | null> {
     const content = fs.readFileSync(tokenFilePath, 'utf-8');
     const tokenData = JSON.parse(content) as FoldTokenData;
 
-    // Check if token is expired or within 60s of expiring
-    const isExpired = tokenData.expires_at ? (Date.now() >= (tokenData.expires_at - 60000)) : false;
+    const isExpired = tokenData.expires_at ? (Date.now() >= (tokenData.expires_at - 90_000)) : false;
     if (isExpired && tokenData.refresh_token) {
-      const refreshedToken = await refreshFoldToken(tokenData, tokenFilePath);
-      if (refreshedToken) return refreshedToken;
+      return await refreshFoldTokenWithLock(false);
     }
 
     return tokenData.access_token || null;
@@ -195,14 +289,9 @@ export async function getFoldAccessToken(): Promise<string | null> {
   }
 }
 
-export async function callFoldTool<T>(toolName: string, args: Record<string, unknown> = {}): Promise<T> {
-  const token = await getFoldAccessToken();
-  if (!token) {
-    throw new Error('Fold access token not found. Please authenticate Fold MCP or set FOLD_ACCESS_TOKEN.');
-  }
-
+async function sendFoldMcpRequest(token: string, toolName: string, args: Record<string, unknown>): Promise<Response> {
   const endpoint = process.env.FOLD_MCP_URL || 'https://mcp.fold.money/mcp';
-  const response = await fetch(endpoint, {
+  return fetch(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -219,6 +308,49 @@ export async function callFoldTool<T>(toolName: string, args: Record<string, unk
       },
     }),
   });
+}
+
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(errorText: string): number {
+  const match = errorText.match(/"retry_after"\s*:\s*"(\d+)s"/i);
+  const seconds = match ? Number(match[1]) : 3;
+  return Math.min(Math.max(seconds * 1000 + 250, 1000), 5000);
+}
+
+export async function isFoldConnected(): Promise<boolean> {
+  const token = await getFoldAccessToken();
+  return Boolean(token);
+}
+
+export async function callFoldTool<T>(toolName: string, args: Record<string, unknown> = {}): Promise<T> {
+  let token = await getFoldAccessToken();
+  if (!token) {
+    throw new Error('Fold not connected yet. Click Connect Fold to link your account once.');
+  }
+
+  let response = await sendFoldMcpRequest(token, toolName, args);
+
+  // If access token was rejected (401), force-refresh once under lock and retry
+  if (response.status === 401 && !process.env.FOLD_ACCESS_TOKEN) {
+    const refreshed = await refreshFoldTokenWithLock(true);
+    if (refreshed) {
+      token = refreshed;
+      response = await sendFoldMcpRequest(token, toolName, args);
+    }
+  }
+
+  // If rate-limited (429), wait briefly as requested by Fold and retry once
+  if (response.status === 429) {
+    const errText = await response.text();
+    const waitMs = parseRetryAfterMs(errText);
+    await sleep(waitMs);
+    response = await sendFoldMcpRequest(token, toolName, args);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -256,19 +388,66 @@ export async function callFoldTool<T>(toolName: string, args: Record<string, unk
   return parsed.result as T;
 }
 
+async function callFoldToolCached<T>(
+  toolName: string,
+  args: Record<string, unknown>,
+  ttlMs: number,
+): Promise<T> {
+  const cacheKey = `${toolName}:${JSON.stringify(args)}`;
+
+  // 1. Fresh SQLite cache hit -> zero Fold API requests
+  const cached = await getCachedFoldResponse<T>(cacheKey);
+  if (cached?.isFresh) {
+    return cached.data;
+  }
+
+  // 2. Deduplicate concurrent requests for the exact same Fold call
+  const existing = inflightRequests.get(cacheKey);
+  if (existing) {
+    return existing as Promise<T>;
+  }
+
+  const promise = (async () => {
+    try {
+      const data = await callFoldTool<T>(toolName, args);
+      await setCachedFoldResponse(cacheKey, data, ttlMs);
+      return data;
+    } catch (err) {
+      // Stale-while-revalidate fallback on transient rate limits (429)
+      if (cached?.data) {
+        console.warn(`[FoldClient] Returning stale cache for ${cacheKey} after error:`, err);
+        return cached.data;
+      }
+      throw err;
+    } finally {
+      inflightRequests.delete(cacheKey);
+    }
+  })();
+
+  inflightRequests.set(cacheKey, promise);
+  return promise;
+}
+
 export async function fetchFoldTotalBalance(): Promise<FoldTotalBalance> {
-  return callFoldTool<FoldTotalBalance>('get_total_balance');
+  return callFoldToolCached<FoldTotalBalance>('get_total_balance', {}, 3 * 60 * 1000);
 }
 
 export async function fetchFoldNetWorth(): Promise<FoldNetWorth> {
-  return callFoldTool<FoldNetWorth>('get_net_worth');
+  return callFoldToolCached<FoldNetWorth>('get_net_worth', {}, 5 * 60 * 1000);
 }
 
 export async function fetchFoldSpendingSummary(month?: number, year?: number): Promise<FoldSpendingSummary> {
   const now = new Date();
-  const m = month ?? (now.getMonth() + 1);
-  const y = year ?? now.getFullYear();
-  return callFoldTool<FoldSpendingSummary>('get_spending_summary', { month: m, year: y });
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const m = month ?? currentMonth;
+  const y = year ?? currentYear;
+
+  // Past months don't change often -> cache 24h; current month -> cache 5m
+  const isPastMonth = y < currentYear || (y === currentYear && m < currentMonth);
+  const ttlMs = isPastMonth ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
+
+  return callFoldToolCached<FoldSpendingSummary>('get_spending_summary', { month: m, year: y }, ttlMs);
 }
 
 export async function fetchFoldRecentTransactions(limit = 100): Promise<{
@@ -276,9 +455,9 @@ export async function fetchFoldRecentTransactions(limit = 100): Promise<{
   total_matched: number;
   transactions: FoldTransaction[];
 }> {
-  return callFoldTool<{
+  return callFoldToolCached<{
     count: number;
     total_matched: number;
     transactions: FoldTransaction[];
-  }>('list_transactions', { limit });
+  }>('list_transactions', { limit }, 3 * 60 * 1000);
 }

@@ -184,4 +184,5 @@ export type GymOsSnapshot = {
   };
   progressPhotoCount: number;
   reminders: GymReminderStatus;
+  exerciseHints?: Record<string, { lastDate: string; lastSets: string; hint: string }>;
 };

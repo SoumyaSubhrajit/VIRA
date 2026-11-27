@@ -41,6 +41,7 @@ export interface FinanceData {
   liquidBalance?: number;
   netWorth?: number;
   source?: 'fold' | 'local' | 'mock';
+  foldConnected?: boolean;
 }
 
 // ─── Career ──────────────────────────────────────────────────────────────────
@@ -57,6 +58,8 @@ export interface CareerData {
   targetIncome: number;     // annual in INR
   skills: Skill[];
   targetRole: string;
+  weeklyFocus?: string | null;
+  updatedAt?: string | null;
   isMock: boolean;
 }
 
@@ -88,6 +91,8 @@ export interface DataSummary {
     totalSpent: number;
     totalBudget: number;
     savingsRate: string;
+    liquidBalance?: number;
+    topCategories?: Array<{ name: string; spent: number; budget: number }>;
     isMock: boolean;
   };
   career: {

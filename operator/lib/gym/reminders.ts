@@ -2,7 +2,8 @@ import { Resend } from 'resend';
 import { getGoogleTaskLink } from '@/lib/google/db';
 import { sendWithConnectedGmail } from '@/lib/google/gmail';
 import { syncTaskToGoogle } from '@/lib/google/sync';
-import { getSchedulerDb } from '@/lib/scheduler/db';
+import { getSchedulerDb, getTasksForDate } from '@/lib/scheduler/db';
+import { getFinanceData } from '@/lib/financeData';
 import { getGymOsSnapshot } from './db';
 import {
   claimGymReminder,
@@ -52,9 +53,9 @@ function time12(time: string): string {
 
 function phaseCopy(slot: GymReminderSlot, snapshot: GymOsSnapshot, nextExercise: string, completed: number, total: number) {
   if (slot === 'briefing') return {
-    subject: `GYM BRIEF // ${snapshot.todayTemplate.name.toUpperCase()} // ${snapshot.todayTemplate.exercises.length} MOVEMENTS`,
-    headline: 'Tonight’s work is already decided.',
-    directive: `Train ${snapshot.todayTemplate.focus}. Review the previous numbers below, prepare the load progression, and arrive ready to execute—not improvise.`,
+    subject: `MORNING BRIEF + GYM // ${snapshot.todayTemplate.name.toUpperCase()}`,
+    headline: 'Today’s session is locked in.',
+    directive: `Train ${snapshot.todayTemplate.focus}. Review your brief and previous numbers below, and execute without overthinking.`,
   };
   if (slot === 'launch') return {
     subject: `MOVE NOW // ${snapshot.todayTemplate.name.toUpperCase()} // START IN 5`,
@@ -117,6 +118,82 @@ async function performanceFor(snapshot: GymOsSnapshot, exerciseName: string): Pr
   return previous ? { label: `Last · ${previous.date}`, sets: previous.sets } : null;
 }
 
+async function buildMorningBrief(snapshot: GymOsSnapshot): Promise<{ html: string; text: string }> {
+  try {
+    const [finance, tasks] = await Promise.all([
+      getFinanceData('default-user').catch(() => null),
+      getTasksForDate(snapshot.date).catch(() => []),
+    ]);
+
+    const openTasks = tasks
+      .filter((t) => !t.id.startsWith('gym-os:') && t.status === 'planned')
+      .slice(0, 3)
+      .map((t) => `${t.startTime} ${t.title}`);
+
+    const moneyLine = finance && !finance.isMock
+      ? `Spent ₹${finance.totalSpent.toLocaleString('en-IN')} / ₹${finance.totalBudget.toLocaleString('en-IN')}${typeof finance.liquidBalance === 'number' ? ` · Bank cash: ₹${finance.liquidBalance.toLocaleString('en-IN')}` : ''}`
+      : null;
+
+    let bullets: string[] = [];
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (apiKey) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(12_000),
+        body: JSON.stringify({
+          model: process.env.OPENAI_FINANCE_MODEL || 'gpt-4o-mini',
+          temperature: 0.3,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Write a 20-second morning brief for someone with ADHD. Return JSON: { "bullets": ["Gym: ...", "Money: ...", "Today: ..."] } — max 18 words per bullet, punchy and direct.',
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                gym: `${snapshot.todayTemplate.name} (${snapshot.todayTemplate.focus}) at ${snapshot.profile.trainingStartTime}`,
+                money: moneyLine ?? 'Fold unavailable',
+                tasks: openTasks,
+              }),
+            },
+          ],
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const raw = json.choices?.[0]?.message?.content;
+        if (raw) {
+          const parsed = JSON.parse(raw) as { bullets?: string[] };
+          if (Array.isArray(parsed.bullets)) {
+            bullets = parsed.bullets.filter((b) => typeof b === 'string' && b.trim()).slice(0, 3);
+          }
+        }
+      }
+    }
+
+    if (bullets.length === 0) {
+      bullets = [
+        `Gym at ${time12(snapshot.profile.trainingStartTime)}: ${snapshot.todayTemplate.name} (${snapshot.todayTemplate.exercises.length} movements).`,
+        moneyLine ? `Money: ${moneyLine}.` : 'Money: open Finance to review today’s budget.',
+        openTasks.length ? `Top task: ${openTasks.join(' · ')}` : 'No extra tasks blocked — focus on training & core work.',
+      ];
+    }
+
+    const htmlList = bullets.map((b) => `<li style="margin:6px 0;color:#e5e9dc">${escapeHtml(b)}</li>`).join('');
+    const html = `<div style="background:#141a10;border:1px solid #303823;padding:16px 18px;margin-bottom:18px"><div style="color:#b5dc42;font-size:11px;letter-spacing:2px;font-weight:700;margin-bottom:6px">20-SECOND MORNING BRIEF</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.5">${htmlList}</ul></div>`;
+    const text = `20-SECOND MORNING BRIEF\n${bullets.map((b) => `- ${b}`).join('\n')}\n\n`;
+    return { html, text };
+  } catch {
+    return { html: '', text: '' };
+  }
+}
+
 async function emailContent(slot: GymReminderSlot, snapshot: GymOsSnapshot): Promise<{ subject: string; html: string; text: string }> {
   const total = snapshot.todayTemplate.exercises.reduce((sum, exercise) => sum + exercise.targetSets, 0);
   const completed = snapshot.todaySession?.sets.filter((set) => !set.warmup).length ?? 0;
@@ -125,6 +202,7 @@ async function emailContent(slot: GymReminderSlot, snapshot: GymOsSnapshot): Pro
     return logged < exercise.targetSets;
   })?.name ?? 'session debrief';
   const copy = phaseCopy(slot, snapshot, nextExercise, completed, total);
+  const morningBrief = slot === 'briefing' ? await buildMorningBrief(snapshot) : { html: '', text: '' };
   const percent = total ? Math.min(100, Math.round(completed / total * 100)) : 100;
   const muscles = Array.from(new Set(snapshot.todayTemplate.exercises.map((exercise) => exercise.muscleGroup))).join(' · ');
   const performances = new Map(await Promise.all(snapshot.todayTemplate.exercises.map(async (exercise) => [
@@ -144,13 +222,13 @@ async function emailContent(slot: GymReminderSlot, snapshot: GymOsSnapshot): Pro
     || 'https://vira-two-tau.vercel.app';
   const host = rawHost.startsWith('http://') || rawHost.startsWith('https://') ? rawHost : `https://${rawHost}`;
   const appUrl = `${host.replace(/\/$/, '')}/gym`;
-  const html = `<!doctype html><html><body style="margin:0;background:#080a07;color:#f2f3e8;font-family:Arial,sans-serif"><div style="max-width:720px;margin:0 auto;padding:34px 18px"><div style="color:#b5dc42;font-size:12px;letter-spacing:3px;font-weight:800">VIRA // GYM COMMAND</div><h1 style="font-size:30px;line-height:1.05;margin:12px 0 8px">${escapeHtml(copy.headline)}</h1><p style="color:#9aa18f;line-height:1.65;margin:0 0 22px">${escapeHtml(copy.directive)}</p><div style="background:#12160f;border:1px solid #303823;border-left:4px solid #b5dc42;padding:18px;margin-bottom:18px"><div style="color:#f0ad45;font-size:11px;letter-spacing:2px">TARGET MUSCLES</div><div style="font-size:19px;font-weight:800;margin-top:7px">${escapeHtml(snapshot.todayTemplate.focus)}</div><div style="color:#8f9786;margin-top:6px">${escapeHtml(muscles)}</div></div><div style="display:flex;justify-content:space-between;color:#9aa18f;font-size:12px;margin-bottom:7px"><span>WORKING-SET PROGRESS</span><strong style="color:#f2f3e8">${completed}/${total} · ${percent}%</strong></div><div style="height:10px;background:#293020;margin-bottom:22px"><div style="height:10px;width:${percent}%;background:#b5dc42"></div></div><table role="presentation" style="width:100%;border-collapse:collapse;background:#10140d;border:1px solid #293020">${rows}</table><div style="margin-top:20px;padding:15px;background:#171b12;color:#9aa18f;font-size:12px;line-height:1.6"><strong style="color:#f0ad45">SEQUENCE</strong><br>${escapeHtml(scheduleLine)}</div><a href="${escapeHtml(appUrl)}" style="display:block;margin-top:18px;background:#b5dc42;color:#11150d;padding:15px;text-align:center;text-decoration:none;font-size:12px;font-weight:900;letter-spacing:2px">OPEN GYM OS →</a><p style="color:#5d6554;font-size:11px;margin-top:18px">Asia/Kolkata · Duplicate-safe dispatch · Gmail first, Resend fallback</p></div></body></html>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#080a07;color:#f2f3e8;font-family:Arial,sans-serif"><div style="max-width:720px;margin:0 auto;padding:34px 18px"><div style="color:#b5dc42;font-size:12px;letter-spacing:3px;font-weight:800">VIRA // GYM COMMAND</div><h1 style="font-size:30px;line-height:1.05;margin:12px 0 8px">${escapeHtml(copy.headline)}</h1><p style="color:#9aa18f;line-height:1.65;margin:0 0 22px">${escapeHtml(copy.directive)}</p>${morningBrief.html}<div style="background:#12160f;border:1px solid #303823;border-left:4px solid #b5dc42;padding:18px;margin-bottom:18px"><div style="color:#f0ad45;font-size:11px;letter-spacing:2px">TARGET MUSCLES</div><div style="font-size:19px;font-weight:800;margin-top:7px">${escapeHtml(snapshot.todayTemplate.focus)}</div><div style="color:#8f9786;margin-top:6px">${escapeHtml(muscles)}</div></div><div style="display:flex;justify-content:space-between;color:#9aa18f;font-size:12px;margin-bottom:7px"><span>WORKING-SET PROGRESS</span><strong style="color:#f2f3e8">${completed}/${total} · ${percent}%</strong></div><div style="height:10px;background:#293020;margin-bottom:22px"><div style="height:10px;width:${percent}%;background:#b5dc42"></div></div><table role="presentation" style="width:100%;border-collapse:collapse;background:#10140d;border:1px solid #293020">${rows}</table><div style="margin-top:20px;padding:15px;background:#171b12;color:#9aa18f;font-size:12px;line-height:1.6"><strong style="color:#f0ad45">SEQUENCE</strong><br>${escapeHtml(scheduleLine)}</div><a href="${escapeHtml(appUrl)}" style="display:block;margin-top:18px;background:#b5dc42;color:#11150d;padding:15px;text-align:center;text-decoration:none;font-size:12px;font-weight:900;letter-spacing:2px">OPEN GYM OS →</a><p style="color:#5d6554;font-size:11px;margin-top:18px">Asia/Kolkata · Duplicate-safe dispatch · Gmail first, Resend fallback</p></div></body></html>`;
   const exerciseText = snapshot.todayTemplate.exercises.map((exercise, index) => {
     const performance = performances.get(exercise.name.toLowerCase());
     const sets = performance?.sets.map((set) => `${set.weightKg}kg x ${set.reps} @RIR${set.rir}`).join(' | ') ?? 'No prior record';
     return `${index + 1}. ${exercise.name} — ${exercise.muscleGroup} — ${exercise.targetSets} x ${exercise.minReps}-${exercise.maxReps}\n   ${performance?.label ?? 'Last'}: ${sets}`;
   }).join('\n');
-  const text = `VIRA GYM COMMAND\n\n${copy.headline}\n${copy.directive}\n\nMUSCLES: ${snapshot.todayTemplate.focus}\nPROGRESS: ${completed}/${total} working sets (${percent}%)\n\n${exerciseText}\n\nSEQUENCE: ${scheduleLine}\n\nOPEN GYM OS: ${appUrl}`;
+  const text = `VIRA GYM COMMAND\n\n${morningBrief.text}${copy.headline}\n${copy.directive}\n\nMUSCLES: ${snapshot.todayTemplate.focus}\nPROGRESS: ${completed}/${total} working sets (${percent}%)\n\n${exerciseText}\n\nSEQUENCE: ${scheduleLine}\n\nOPEN GYM OS: ${appUrl}`;
   return { subject: copy.subject, html, text };
 }
 

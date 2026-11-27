@@ -1,4 +1,9 @@
-import { fetchFoldRecentTransactions, fetchFoldSpendingSummary, fetchFoldTotalBalance, fetchFoldNetWorth } from './foldClient';
+import {
+  clearFoldResponseCache,
+  fetchFoldRecentTransactions,
+  fetchFoldSpendingSummary,
+  fetchFoldTotalBalance,
+} from './foldClient';
 import { saveFinanceTransaction, setFinanceImportState, getExistingFinanceSourceIds } from './db';
 import { suggestCategory } from './categories';
 
@@ -12,6 +17,7 @@ export interface FoldSyncResult {
 }
 
 export async function syncFoldTransactions(limit = 100): Promise<FoldSyncResult> {
+  await clearFoldResponseCache();
   const [txData, balanceData, summaryData] = await Promise.all([
     fetchFoldRecentTransactions(limit),
     fetchFoldTotalBalance().catch(() => null),

@@ -609,6 +609,34 @@ export async function getGymOsSnapshot(date: string): Promise<GymOsSnapshot> {
   const migration = await database.prepare('SELECT imported_rows,imported_at FROM gym_migrations WHERE migration_key=?').get<{ imported_rows: number; imported_at: string }>(LEGACY_MIGRATION);
   const photoCount = await database.prepare('SELECT COUNT(*) AS count FROM gym_progress_photos WHERE user_id=?').get<{ count: number }>(USER_ID) as { count: number };
   const todaySession = await sessionForDate(database, date);
+  const exerciseHints: Record<string, { lastDate: string; lastSets: string; hint: string }> = {};
+  for (const ex of todayTemplate.exercises) {
+    const latestDateRow = await database
+      .prepare(`
+        SELECT MAX(g.session_date) AS session_date
+        FROM gym_set_logs s JOIN gym_sessions g ON g.id=s.session_id
+        WHERE g.user_id=? AND g.session_date<? AND lower(s.exercise_name)=lower(?) AND s.warmup=0
+      `)
+      .get<{ session_date: string | null }>(USER_ID, date, ex.name);
+    if (!latestDateRow?.session_date) continue;
+    const prevSets = await database
+      .prepare(`
+        SELECT s.weight_kg AS weightKg, s.reps
+        FROM gym_set_logs s JOIN gym_sessions g ON g.id=s.session_id
+        WHERE g.user_id=? AND g.session_date=? AND lower(s.exercise_name)=lower(?) AND s.warmup=0
+        ORDER BY s.set_number
+      `)
+      .all<{ weightKg: number; reps: number }>(USER_ID, latestDateRow.session_date, ex.name);
+    if (prevSets.length === 0) continue;
+    const lastSets = prevSets.map((s) => `${s.weightKg}kg×${s.reps}`).join(', ');
+    const topWeight = Math.max(...prevSets.map((s) => Number(s.weightKg)));
+    const hitMaxAll = prevSets.length >= ex.targetSets && prevSets.every((s) => Number(s.reps) >= ex.maxReps);
+    const hint = hitMaxAll
+      ? `All ${ex.targetSets} sets hit ${ex.maxReps}+ reps → try ${topWeight + 2.5}kg today`
+      : `Match ${topWeight}kg and push for +1 rep per set`;
+    exerciseHints[ex.id] = { lastDate: latestDateRow.session_date, lastSets, hint };
+  }
+
   const currentDate = new Intl.DateTimeFormat('en-CA', { timeZone: profile.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   if (date >= currentDate && todayTemplate.weekday !== 0) {
     await ensureGymSchedulerTask({ date, profile, template: todayTemplate, session: todaySession });
@@ -623,6 +651,7 @@ export async function getGymOsSnapshot(date: string): Promise<GymOsSnapshot> {
     migration: { importedDays: migration?.imported_rows ?? 0, importedAt: migration?.imported_at ?? null },
     progressPhotoCount: photoCount.count,
     reminders: await getGymReminderStatus(date, profile),
+    exerciseHints,
   };
 }
 

@@ -1,6 +1,16 @@
 import type { FinanceData, FinanceCategory } from './types';
 import { getFinanceImportState, getFinanceTransactionsForMonth } from './finance/db';
-import { fetchFoldSpendingSummary, fetchFoldTotalBalance, fetchFoldNetWorth } from './finance/foldClient';
+import {
+  fetchFoldRecentTransactions,
+  fetchFoldSpendingSummary,
+  fetchFoldTotalBalance,
+  fetchFoldNetWorth,
+  isFoldConnected,
+} from './finance/foldClient';
+import {
+  applyAiCategoriesToSummary,
+  classifyUntaggedFoldTransactions,
+} from './finance/foldCategorizer';
 
 const DEFAULT_BUDGETS: Record<string, number> = {
   Bill: 15000,
@@ -11,8 +21,11 @@ const DEFAULT_BUDGETS: Record<string, number> = {
   Subscription: 2000,
   Entertainment: 2000,
   Investment: 5000,
-  Medical: 2000,
+  'Medical': 2000,
+  'Transfers & P2P': 10000,
+  Other: 5000,
   Misc: 5000,
+  'Untagged / Other': 5000,
 };
 
 const MOCK: FinanceData = {
@@ -34,30 +47,37 @@ const MOCK: FinanceData = {
 
 export async function getFinanceData(_userId: string): Promise<FinanceData> {
   const now = new Date();
+  const foldConnected = await isFoldConnected().catch(() => false);
 
   // 1. Try querying Fold live spending summary & balances first
-  try {
-    const [spendingSummary, balanceData, netWorthData] = await Promise.all([
+  if (foldConnected) try {
+    const [spendingSummary, balanceData, netWorthData, recentTx] = await Promise.all([
       fetchFoldSpendingSummary(now.getMonth() + 1, now.getFullYear()).catch(() => null),
       fetchFoldTotalBalance().catch(() => null),
       fetchFoldNetWorth().catch(() => null),
+      fetchFoldRecentTransactions(200).catch(() => null),
     ]);
 
     if (spendingSummary && spendingSummary.categories) {
-      const categories: FinanceCategory[] = spendingSummary.categories.map((c) => ({
+      const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthDebitTx = (recentTx?.transactions ?? []).filter(
+        (tx) => tx.type === 'DEBIT' && tx.date.startsWith(monthPrefix),
+      );
+      const aiCatMap = await classifyUntaggedFoldTransactions(monthDebitTx);
+
+      const baseCategories: FinanceCategory[] = spendingSummary.categories.map((c) => ({
         name: c.category_name,
         spent: Math.round(c.amount),
         budget: DEFAULT_BUDGETS[c.category_name] ?? Math.max(Math.round(c.amount * 1.2), 1000),
       }));
 
-      // Add untagged/misc if present
-      if (spendingSummary.untagged && spendingSummary.untagged.amount > 0) {
-        categories.push({
-          name: 'Untagged / Other',
-          spent: Math.round(spendingSummary.untagged.amount),
-          budget: DEFAULT_BUDGETS['Misc'] ?? 5000,
-        });
-      }
+      const categories = applyAiCategoriesToSummary(
+        baseCategories,
+        spendingSummary.untagged?.amount ?? 0,
+        monthDebitTx,
+        aiCatMap,
+        DEFAULT_BUDGETS,
+      );
 
       const totalBudget = categories.reduce((sum, c) => sum + c.budget, 0);
       const totalSpent = Math.round(spendingSummary.total_amount);
@@ -74,6 +94,7 @@ export async function getFinanceData(_userId: string): Promise<FinanceData> {
         liquidBalance,
         netWorth,
         source: 'fold',
+        foldConnected: true,
         lastImportAt: new Date().toISOString(),
       };
     }
@@ -88,7 +109,7 @@ export async function getFinanceData(_userId: string): Promise<FinanceData> {
   const importState = await getFinanceImportState();
 
   if (transactions.length === 0 && !importState.lastImportAt) {
-    return MOCK;
+    return { ...MOCK, foldConnected };
   }
 
   const budgetByCategory: Record<string, number> = {
@@ -128,5 +149,6 @@ export async function getFinanceData(_userId: string): Promise<FinanceData> {
     transactionCount: transactions.length,
     lastImportAt: importState.lastImportAt,
     source: 'local',
+    foldConnected,
   };
 }

@@ -197,6 +197,23 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
             Live Sync & Intake
           </span>
           <div style={{ display: 'flex', gap: '6px' }}>
+            {!data.foldConnected && data.source !== 'fold' && (
+              <a
+                href="/api/finance/fold/auth"
+                className="btn"
+                style={{
+                  fontSize: '11px',
+                  padding: '0.25rem 0.65rem',
+                  background: '#10B981',
+                  color: '#FFFFFF',
+                  borderColor: '#10B981',
+                  textDecoration: 'none',
+                  fontWeight: 700,
+                }}
+              >
+                Connect Fold
+              </a>
+            )}
             <button
               type="button"
               className="btn"
@@ -213,7 +230,9 @@ export default function FinancePanel({ data, loading, onRefresh }: FinancePanelP
           </div>
         </div>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          Fold MCP integration active. Click <strong>Sync Fold</strong> to refresh local transaction records.
+          {data.source === 'fold' || data.foldConnected
+            ? <>Fold connected &amp; auto-refreshing. Click <strong>Sync Fold</strong> to refresh live records.</>
+            : <>Click <strong>Connect Fold</strong> once to link your Fold account permanently.</>}
         </span>
         {importFeedback && (
           <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--amber)' }}>

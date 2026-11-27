@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 
-const baseUrl = process.env.VERA_BASE_URL || 'http://localhost:3100';
+const baseUrl = process.env.VERA_BASE_URL || 'http://localhost:3000';
 
 cron.schedule('* * * * *', async () => {
   try {
