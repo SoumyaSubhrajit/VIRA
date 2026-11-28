@@ -34,11 +34,30 @@ function zonedParts(now: Date, timezone: string): { date: string; minutes: numbe
 export function getDueGymReminder(now: Date, snapshot: GymOsSnapshot): DueGymReminder | null {
   const current = zonedParts(now, snapshot.reminders.timezone);
   const schedule = gymReminderSchedule(snapshot.profile);
-  const slot = schedule.find((item) => {
+  const attempted = new Set(snapshot.reminders.deliveries.map((d) => d.slot));
+
+  // 1. Prefer an exact slot within its normal 9-minute window (preserves strict order)
+  const exact = schedule.find((item) => {
     const scheduled = timeToMinutes(item.time);
     return current.minutes >= scheduled && current.minutes <= scheduled + 9;
   });
-  return slot ? { workoutDate: current.date, slot } : null;
+  if (exact) return { workoutDate: current.date, slot: exact };
+
+  // 2. Resilient catch-up for Vercel Hobby / GitHub cron jitter:
+  // Ensure Morning Briefing (up to +60m) and Post-Workout Debrief (up to +180m) still send once per day
+  const catchup = schedule.find((item) => {
+    if (attempted.has(item.slot)) return false;
+    const scheduled = timeToMinutes(item.time);
+    if (item.slot === 'briefing') {
+      return current.minutes >= scheduled && current.minutes <= scheduled + 60;
+    }
+    if (item.slot === 'debrief') {
+      return current.minutes >= scheduled && current.minutes <= scheduled + 180;
+    }
+    return false;
+  });
+
+  return catchup ? { workoutDate: current.date, slot: catchup } : null;
 }
 
 function escapeHtml(value: string): string {

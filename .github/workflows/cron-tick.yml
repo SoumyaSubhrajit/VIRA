@@ -12,6 +12,6 @@ jobs:
     steps:
       - name: Trigger VIRA Cron Tick
         run: |
-          curl -s -X POST https://vira-two-tau.vercel.app/api/cron/tick \
+          curl -fsS -X POST https://vira-two-tau.vercel.app/api/cron/tick \
             -H "Authorization: Bearer ${{ secrets.SCHEDULER_SECRET }}" \
             -H "Content-Type: application/json"
